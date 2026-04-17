@@ -10,7 +10,7 @@ The default implementation on `main` is **Python/JAX**. A parallel Julia impleme
 
 - **`expmsfem/`** — the Python package. Elliptic and Helmholtz ExpMsFEM plus the `H+bubble` / `O(H)` MsFEM baselines.
 - **`tests/`** — 61 unit + convergence tests covering primitives, local operators, assembly, and end-to-end convergence.
-- **`examples/`** — scripts mirroring the Matlab `main.m` drivers for periodic / random / high-contrast elliptic and for the Helmholtz case.
+- **`examples/`** — scripts mirroring the [Matlab](https://github.com/RoyWangyx/Exponentially-convergent-multiscale-finite-elements.git) `main.m` drivers for periodic / random / high-contrast elliptic and for the Helmholtz case.
 - **`demos/`** — six standalone figure-generating demos. Re-run with `python demos/run_all.py`.
 - **`figures/`** — gallery of pre-generated PNGs used below.
 
