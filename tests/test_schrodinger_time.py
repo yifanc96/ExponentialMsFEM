@@ -76,6 +76,40 @@ def test_expmsfem_converges_in_N_e():
     assert errs[0] / errs[-1] > 1e2, f"errs = {errs}"
 
 
+def test_expmsfem_periodic_converges():
+    """Periodic BC: ExpMsFEM matches fine reference, monotonic convergence in N_e."""
+    eps = 0.3
+    V = lambda x, y: 2.0 * (np.sin(np.pi * 16 * x) ** 2
+                            + np.sin(np.pi * 16 * y) ** 2)
+    param = SemiclassicalParam(eps=eps, V_fun=V, dt=1e-3, boundary="periodic")
+    N_c, N_f = 8, 8
+    N_fine = N_c * N_f
+    psi0 = _make_ic(N_fine, x0=0.5, y0=0.5, sigma=0.08, kx=2.0, eps=eps)
+
+    ts_ref, frames_ref, B_ref, M_ref = solve_fine_backward_euler(
+        param, psi0, N_fine, n_steps=10, save_stride=10,
+    )
+
+    h = 1.0 / N_fine
+    errs = []
+    for N_e in [1, 3, 5]:
+        ts_ms, frames_ms, prop = run_expmsfem_schrodinger(
+            param, psi0, N_c, N_f, N_e=N_e, n_steps=10, save_stride=10,
+            n_workers=2,
+        )
+        psi_r = frames_ref[:, -1]
+        psi_m = frames_ms[:, -1]
+        err = psi_r - psi_m
+        rel = float(np.sqrt(
+            np.real(np.sum(err.conj() * err)) * h ** 2
+            / np.real(np.sum(psi_r.conj() * psi_r)) / h ** 2
+        ))
+        errs.append(rel)
+    errs = np.array(errs)
+    assert np.all(np.diff(errs) < 0), f"not monotone: {errs}"
+    assert errs[0] / errs[-1] > 10, f"errs = {errs}"
+
+
 def test_wavepacket_stays_bounded():
     """A non-trivial wavepacket stays close to the fine reference across
     many steps (no blow-up)."""

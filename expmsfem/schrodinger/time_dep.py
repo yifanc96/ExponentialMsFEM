@@ -1,8 +1,11 @@
-"""Time-dependent Schrödinger via backward Euler + ExpMsFEM (Dirichlet-0 BC).
+"""Time-dependent Schrödinger via backward Euler + ExpMsFEM (Dirichlet-0
+or periodic BC — select with `SemiclassicalParam.boundary`).
 
 Semi-classical Schrödinger on `Ω = (0, 1)²`:
 
-    i ε ∂_t ψ = -½ ε² Δ ψ + V(x) ψ,   ψ(0, x) = ψ₀(x),   ψ|_∂Ω = 0.
+    i ε ∂_t ψ = -½ ε² Δ ψ + V(x) ψ,   ψ(0, x) = ψ₀(x),
+    either  ψ|_∂Ω = 0         (boundary="dirichlet")
+    or      ψ periodic in x, y (boundary="periodic")
 
 Backward-Euler in time gives a linear complex elliptic problem per step:
 
@@ -59,11 +62,25 @@ class SemiclassicalParam:
     eps: float
     V_fun: Callable
     dt: float
+    boundary: str = "dirichlet"   # "dirichlet" or "periodic"
+
+    def __post_init__(self):
+        if self.boundary not in ("dirichlet", "periodic"):
+            raise ValueError(f"boundary must be 'dirichlet' or 'periodic', got {self.boundary!r}")
 
     @property
     def im_shift(self) -> complex:
         """The complex coefficient `-i ε / Δt` of the mass-matrix shift."""
         return -1j * self.eps / self.dt
+
+    def V_at(self, x, y):
+        """Evaluate V, wrapping coordinates to `[0, 1]²` when `boundary == "periodic"`.
+        This lets the user supply an arbitrary V; the wrapping makes sure cells in
+        oversampled patches that slightly exceed the domain still sample a
+        sensible value (naturally consistent if V is already period-1)."""
+        if self.boundary == "periodic":
+            return self.V_fun(np.asarray(x) % 1.0, np.asarray(y) % 1.0)
+        return self.V_fun(x, y)
 
 
 # -----------------------------------------------------------------------------
@@ -83,7 +100,7 @@ def _assemble_B_and_M(param: SemiclassicalParam,
     xmid = 0.5 * (xs[:-1] + xs[1:])
     ymid = 0.5 * (ys[:-1] + ys[1:])
     XC, YC = np.meshgrid(xmid, ymid, indexing="xy")
-    V_c = np.asarray(param.V_fun(XC, YC), dtype=np.float64).ravel()
+    V_c = np.asarray(param.V_at(XC, YC), dtype=np.float64).ravel()
 
     eps2 = param.eps ** 2
     shift = param.im_shift            # = -i ε / Δt
@@ -110,20 +127,75 @@ def _assemble_B_and_M(param: SemiclassicalParam,
 # -----------------------------------------------------------------------------
 
 
+def _fine_periodic_remap(N_f: int) -> np.ndarray:
+    """Return `remap` of length `(N_f+1)²` such that `remap[k_full]` is the
+    periodic DOF index in `[0, N_f²)` for the original fine node `k_full`.
+    Nodes at `i = N_f` are identified with `i = 0`, and similarly in `j`."""
+    n = (N_f + 1) ** 2
+    remap = np.empty(n, dtype=np.int64)
+    for j in range(N_f + 1):
+        for i in range(N_f + 1):
+            remap[j * (N_f + 1) + i] = (j % N_f) * N_f + (i % N_f)
+    return remap
+
+
+def _reduce_to_periodic(A_full: sp.spmatrix, N_f: int):
+    """Fold opposite-face fine DOFs into one via the gather matrix `P` so
+    `A_per = P · A_full · P^T`  has shape `(N_f², N_f²)`."""
+    remap = _fine_periodic_remap(N_f)
+    n_full = (N_f + 1) ** 2
+    n_per = N_f * N_f
+    P = sp.csr_matrix((np.ones(n_full), (remap, np.arange(n_full))),
+                      shape=(n_per, n_full))
+    return (P @ A_full @ P.T).tocsc(), remap
+
+
 def solve_fine_backward_euler(param: SemiclassicalParam, psi0: np.ndarray,
                               N_f: int, n_steps: int, save_stride: int = 1):
     """Backward-Euler fine-reference propagator. Returns
 
         ts        : (n_saved,) time values (including t=0)
         frames    : ((N_f+1)², n_saved) complex fine-scale snapshots of ψ
-        B, M      : the assembled sparse matrices (handy for error norms)
+                    (re-expanded to the full `(N_f+1)²` grid in the periodic
+                    case — opposite-face nodes share the same value).
+        B, M      : the assembled sparse matrices (reduced-DOF for periodic,
+                    full-DOF for Dirichlet).
 
-    The operator `B_int = B[interior, interior]` is LU-factored once via
-    `scipy.sparse.linalg.splu`; every step is a back-substitution.
+    The operator is LU-factored once via `scipy.sparse.linalg.splu`; every
+    step is a back-substitution.
     """
     xs = np.linspace(0, 1, N_f + 1)
     ys = xs.copy()
-    B, M = _assemble_B_and_M(param, xs, ys)
+    B_full, M_full = _assemble_B_and_M(param, xs, ys)
+    shift = param.im_shift
+
+    if param.boundary == "periodic":
+        B, remap = _reduce_to_periodic(B_full, N_f)
+        M, _ = _reduce_to_periodic(M_full, N_f)
+        lu = spla.splu(B)
+
+        # Initial condition: pick canonical representatives (the N_f² nodes
+        # with i, j in [0, N_f)). Assumes ψ₀ is already periodic (or effectively
+        # zero near the boundary, like a centred wavepacket).
+        psi_full0 = np.asarray(psi0, dtype=np.complex128).ravel()
+        canonical = np.array([j * (N_f + 1) + i
+                              for j in range(N_f) for i in range(N_f)],
+                             dtype=np.int64)
+        psi_per = psi_full0[canonical].copy()
+
+        ts = [0.0]
+        frames_full = [psi_per[remap].copy()]
+        for step in range(1, n_steps + 1):
+            rhs = shift * (M @ psi_per)
+            psi_per = lu.solve(rhs)
+            if step % save_stride == 0:
+                ts.append(step * param.dt)
+                frames_full.append(psi_per[remap].copy())
+        return np.array(ts), np.array(frames_full).T, B, M
+
+    # --- Dirichlet branch (unchanged) ---
+    B = B_full
+    M = M_full
     bdy = domain_boundary_nodes(N_f, N_f)
     mask = np.ones(B.shape[0], dtype=bool)
     mask[bdy] = False
@@ -134,7 +206,6 @@ def solve_fine_backward_euler(param: SemiclassicalParam, psi0: np.ndarray,
     psi = np.asarray(psi0, dtype=np.complex128).copy()
     psi[bdy] = 0.0
 
-    shift = param.im_shift
     ts = [0.0]
     frames = [psi.copy()]
     for step in range(1, n_steps + 1):
@@ -217,14 +288,37 @@ def _patch_bounds(m: int, n: int, N_c: int, t: int):
     return m0, Nx_cells, n0, Ny_cells
 
 
+def _patch_bounds_periodic(m: int, n: int, N_c: int, t: int):
+    """3-wide × 2-wide oversampled-patch geometry for periodic BC. All
+    edges are interior (no domain boundary), so patches always extend a
+    full cell on each side of the shared edge — m0 / n0 may be negative
+    (meaning the patch wraps), which is fine as long as V is evaluated
+    with modular coordinates."""
+    if t == 1:
+        m0 = m - 1            # may be -1 at m=0 → patch spans x ∈ [-H, 2H]
+        Nx_cells = 3
+        n0 = n
+        Ny_cells = 2
+    else:
+        m0 = m
+        Nx_cells = 2
+        n0 = n - 1
+        Ny_cells = 3
+    return m0, Nx_cells, n0, Ny_cells
+
+
 def patch_B_and_M(param: SemiclassicalParam, m: int, n: int, N_c: int,
                   N_f: int, t: int):
     """Complex `B_patch` and real `M_patch` for the oversampled patch around
-    the edge at (m, n, t)."""
-    m0, Nx_cells, n0, Ny_cells = _patch_bounds(m, n, N_c, t)
+    the edge at (m, n, t). Geometry depends on `param.boundary`."""
+    if param.boundary == "periodic":
+        m0, Nx_cells, n0, Ny_cells = _patch_bounds_periodic(m, n, N_c, t)
+    else:
+        m0, Nx_cells, n0, Ny_cells = _patch_bounds(m, n, N_c, t)
     H = 1.0 / N_c
     xs = np.linspace(m0 * H, (m0 + Nx_cells) * H, Nx_cells * N_f + 1)
     ys = np.linspace(n0 * H, (n0 + Ny_cells) * H, Ny_cells * N_f + 1)
+    # V is evaluated via `param.V_at`, which wraps coords modulo 1 when periodic.
     B, M = _assemble_B_and_M(param, xs, ys)
     return B, M, Nx_cells * N_f, Ny_cells * N_f, m0, n0
 
@@ -312,9 +406,13 @@ def harmext(ws: Workspace, m, n, i):
     data. Returns (L1, L2, N_mat) analogous to the elliptic code, where
     N_mat = L1' B1 L1 + L2' B2 L2 is the 2-cell complex energy Gram matrix
     (uses the Hermitian inner product L^H · B · L per Matlab Helmholtz
-    convention)."""
+    convention). For `boundary == "periodic"` the neighbouring cell index
+    wraps modulo `N_c`."""
     B1, _, b1, lu1 = ws.cell_factor(m, n)
-    other = (m, n + 1) if i == 1 else (m + 1, n)
+    if ws.param.boundary == "periodic":
+        other = (m, (n + 1) % ws.N_c) if i == 1 else ((m + 1) % ws.N_c, n)
+    else:
+        other = (m, n + 1) if i == 1 else (m + 1, n)
     B2, _, b2, lu2 = ws.cell_factor(*other)
     f1, f2 = _harmext_rhs(ws.N_f, i)
     n_nodes = (ws.N_f + 1) ** 2
@@ -408,7 +506,14 @@ def restrict(ws: Workspace, m, n, t):
                 independent of the time-dependent ψ_n)
     """
     B_patch, _, Nx, Ny, m0, n0, b_patch, lu = ws.patch_factor(m, n, t)
-    mask = _restrict_active_mask(ws.N_c, ws.N_f, m, n, t, Nx, Ny)
+    if ws.param.boundary == "periodic":
+        # Every patch is fully interior to the torus — no domain-boundary
+        # sides to mask off; just drop the last perimeter DOF.
+        P_size = 2 * (Nx + Ny)
+        mask = np.ones(P_size, dtype=bool)
+        mask[-1] = False
+    else:
+        mask = _restrict_active_mask(ws.N_c, ws.N_f, m, n, t, Nx, Ny)
     active = np.where(mask)[0]
     n_active = active.size
     bdy_vals = np.zeros((b_patch.size, n_active), dtype=np.complex128)
@@ -470,8 +575,13 @@ def _build_edge_data(ws, t, m_edge, n_edge, N_e):
 def prefactor_edges(ws: Workspace, N_e, n_workers=None):
     ws._edge_cache = {}
     N_c = ws.N_c
-    keys = ([(1, m, n) for n in range(N_c - 1) for m in range(N_c)]
-            + [(2, m, n) for n in range(N_c) for m in range(N_c - 1)])
+    if ws.param.boundary == "periodic":
+        # Every edge of the torus is interior: N_c² horizontal + N_c² vertical.
+        keys = ([(1, m, n) for n in range(N_c) for m in range(N_c)]
+                + [(2, m, n) for n in range(N_c) for m in range(N_c)])
+    else:
+        keys = ([(1, m, n) for n in range(N_c - 1) for m in range(N_c)]
+                + [(2, m, n) for n in range(N_c) for m in range(N_c - 1)])
     with cf.ThreadPoolExecutor(max_workers=n_workers) as pool:
         for key, val in pool.map(lambda k: (k, _build_edge_data(ws, *k, N_e)),
                                   keys):
@@ -512,23 +622,27 @@ def _element_value(ws: Workspace, m, n, N_e):
 
     off = 4
     block = N_e + 1
+    periodic = (ws.param.boundary == "periodic")
     # Edge ordering: bottom, top, left, right. Matches the elliptic layout.
-    if n > 0:
-        L1RV, L2RV, L1b, L2b = ws._edge_cache[(1, m, n - 1)]
+    # For periodic BC every edge is interior and neighbour indices wrap mod N_c.
+    if periodic or n > 0:
+        n_lower = (n - 1) % N_c if periodic else (n - 1)
+        L1RV, L2RV, L1b, L2b = ws._edge_cache[(1, m, n_lower)]
         value[:, off:off + N_e] = L2RV
         value[:, off + N_e] = L2b
     off += block
-    if n < N_c - 1:
+    if periodic or n < N_c - 1:
         L1RV, L2RV, L1b, L2b = ws._edge_cache[(1, m, n)]
         value[:, off:off + N_e] = L1RV
         value[:, off + N_e] = L1b
     off += block
-    if m > 0:
-        L1RV, L2RV, L1b, L2b = ws._edge_cache[(2, m - 1, n)]
+    if periodic or m > 0:
+        m_lower = (m - 1) % N_c if periodic else (m - 1)
+        L1RV, L2RV, L1b, L2b = ws._edge_cache[(2, m_lower, n)]
         value[:, off:off + N_e] = L2RV
         value[:, off + N_e] = L2b
     off += block
-    if m < N_c - 1:
+    if periodic or m < N_c - 1:
         L1RV, L2RV, L1b, L2b = ws._edge_cache[(2, m, n)]
         value[:, off:off + N_e] = L1RV
         value[:, off + N_e] = L1b
@@ -547,6 +661,56 @@ def _cell_bubble(ws: Workspace, m, n, f_fine_local: np.ndarray) -> np.ndarray:
 # -----------------------------------------------------------------------------
 # ExpMsFEM propagator: offline build + per-step online advance
 # -----------------------------------------------------------------------------
+
+
+def cell_global_indices_periodic(m: int, n: int, N_c: int, N_e: int,
+                                  n_per_edge: int) -> np.ndarray:
+    """Periodic coarse DOF layout for cell (m, n). Every face of the torus
+    is interior; opposite-face DOFs share the same global index.
+
+    Layout:
+      * 0 .. N_c²-1                   nodal corners (N_c × N_c grid, wrapped).
+      * N_c² .. N_c² + N_c²·n_per_edge − 1  horizontal edges (N_c × N_c grid).
+      * rest                          vertical edges (N_c × N_c grid).
+    """
+    count = 4 + 4 * n_per_edge
+    out = np.empty(count, dtype=np.int64)
+
+    def _nodal(i, j):
+        return (j % N_c) * N_c + (i % N_c)
+
+    out[0] = _nodal(m, n)
+    out[1] = _nodal(m + 1, n)
+    out[2] = _nodal(m + 1, n + 1)
+    out[3] = _nodal(m, n + 1)
+
+    n_nodal = N_c * N_c
+    # Horizontal edges — (col m, row k), flat idx = (k%N_c)*N_c + (m%N_c)
+    def _h(col, row):
+        return (row % N_c) * N_c + (col % N_c)
+    out[4 : 4 + n_per_edge] = (
+        n_nodal + _h(m, n) * n_per_edge + np.arange(n_per_edge)
+    )
+    out[4 + n_per_edge : 4 + 2 * n_per_edge] = (
+        n_nodal + _h(m, n + 1) * n_per_edge + np.arange(n_per_edge)
+    )
+
+    base_v = n_nodal + N_c * N_c * n_per_edge
+    # Vertical edges — (col k, row n), flat idx = (k%N_c)*N_c + (n%N_c)
+    def _v(col, row):
+        return (col % N_c) * N_c + (row % N_c)
+    out[4 + 2 * n_per_edge : 4 + 3 * n_per_edge] = (
+        base_v + _v(m, n) * n_per_edge + np.arange(n_per_edge)
+    )
+    out[4 + 3 * n_per_edge : 4 + 4 * n_per_edge] = (
+        base_v + _v(m + 1, n) * n_per_edge + np.arange(n_per_edge)
+    )
+    return out
+
+
+def n_total_periodic(N_c: int, n_per_edge: int) -> int:
+    """Total coarse DOFs for the periodic layout: nodal + 2 edge blocks."""
+    return N_c * N_c * (1 + 2 * n_per_edge)
 
 
 class SchrodingerPropagator:
@@ -588,16 +752,30 @@ class SchrodingerPropagator:
             print(f"  per-cell bases: {time.time() - t0:.2f}s")
         self.values = values
 
-        # Coarse B and M via standard assembly (reuses elliptic DOF layout
-        # with n_per_edge = N_e + 1: N_e edge eigenmodes + 1 edge bubble).
+        # Coarse B and M via standard assembly. For Dirichlet BC we reuse
+        # the elliptic DOF layout (n_per_edge = N_e + 1: N_e edge eigenmodes
+        # + 1 edge bubble). For periodic BC we use a reduced periodic
+        # layout: N_c² nodal corners + 2·N_c² edge blocks (no "+1 row"
+        # of horizontal edges, no "+1 column" of verticals — opposite
+        # faces share the same DOF).
+        periodic = (param.boundary == "periodic")
+        self.periodic = periodic
         self.cell_idx = np.empty((n_cells, count), dtype=np.int64)
         for n in range(N_c):
             for m in range(N_c):
                 cell = n * N_c + m
-                self.cell_idx[cell] = cell_global_indices(
-                    m, n, N_c, N_e, n_per_edge=N_e + 1)
-        self.N_total = n_total(N_c, N_e, n_per_edge=N_e + 1)
-        self.bdy = domain_boundary_dofs(N_c, N_e, n_per_edge=N_e + 1)
+                if periodic:
+                    self.cell_idx[cell] = cell_global_indices_periodic(
+                        m, n, N_c, N_e, n_per_edge=N_e + 1)
+                else:
+                    self.cell_idx[cell] = cell_global_indices(
+                        m, n, N_c, N_e, n_per_edge=N_e + 1)
+        if periodic:
+            self.N_total = n_total_periodic(N_c, n_per_edge=N_e + 1)
+            self.bdy = np.empty(0, dtype=np.int64)
+        else:
+            self.N_total = n_total(N_c, N_e, n_per_edge=N_e + 1)
+            self.bdy = domain_boundary_dofs(N_c, N_e, n_per_edge=N_e + 1)
 
         # Build coarse B and M via the complex-symmetric (transpose) pairing:
         #     B_coarse = value^T · B_fine · value,   M_coarse = value^T · M_fine · value.

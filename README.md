@@ -7,9 +7,9 @@ Exponentially convergent multiscale finite element methods (ExpMsFEM) for 2D ell
 ## Contents
 
 - [`expmsfem/`](expmsfem) — Python package: ExpMsFEM for elliptic, Helmholtz, and time-dependent Schrödinger; `H+bubble` and `O(H)` MsFEM baselines.
-- [`tests/`](tests) — 64 unit and convergence tests.
+- [`tests/`](tests) — 65 unit and convergence tests.
 - [`examples/`](examples) — scripts mirroring the [reference Matlab](https://github.com/RoyWangyx/Exponentially-convergent-multiscale-finite-elements.git) `main.m` drivers (periodic, random, high-contrast, Helmholtz).
-- [`demos/`](demos) — 11 standalone figure-generating demos. Re-run with `python demos/run_all.py`.
+- [`demos/`](demos) — 12 standalone figure-generating demos. Re-run with `python demos/run_all.py`.
 - [`figures/`](figures) — pre-generated PNGs used below.
 
 ## Quickstart
@@ -73,7 +73,8 @@ Each numbered section maps to a script in [`demos/`](demos) and a figure in [`fi
 8. [Plain FEM vs ExpMsFEM on rough coefficients](#8-why-multiscale-beats-plain-fem-on-rough-coefficients).
 9. [Perforated domain](#9-perforated--complicated-domains-fictitious-domain-coefficient) — 16-hole lattice.
 10. [NACA 0012 airfoil](#10-cfd-adjacent-naca-0012-airfoil-in-a-box-far-field) — CFD-adjacent fictitious-domain geometry.
-11. [Time-dependent Schrödinger](#11-time-dependent-schrödinger-with-a-multiscale-potential-semi-classical-backward-euler) — wavepacket scattering through a sub-mesh crystal potential.
+11. [Time-dependent Schrödinger (Dirichlet)](#11-time-dependent-schrödinger-with-a-multiscale-potential-semi-classical-backward-euler) — wavepacket scattering through a sub-mesh crystal potential.
+12. [Time-dependent Schrödinger (periodic)](#12-time-dependent-schrödinger-with-periodic-bc) — same physics on a torus; the packet wraps around.
 
 ### 1. Coefficient fields
 
@@ -218,6 +219,27 @@ ts, frames, prop = run_expmsfem_schrodinger(
 # frames[:, i] is ψ at time ts[i] on the (N_c·N_f + 1)² fine grid.
 ```
 
+### 12. Time-dependent Schrödinger with periodic BC
+
+Same physics as §11, but on the torus `ℝ²/ℤ²` instead of a box: wavepacket exiting the right edge reappears on the left. Pass `boundary="periodic"` to `SemiclassicalParam` and both the fine reference and the ExpMsFEM propagator switch to periodic DOF wrapping — no Dirichlet truncation.
+
+The potential must be 1-periodic in both axes for the torus to be well-defined, so the demo uses
+
+`V(x, y) = 2 · ( sin²(π · 16 · x) + sin²(π · 16 · y) )`
+
+which has period `1/16`, matching the coarse mesh `H = 1/16` exactly (one crystal period per coarse cell, but the fine mesh still has `N_f = 8` subdivisions of each). The packet is launched near the right edge `(x₀ = 0.8, y₀ = 0.5)` with momentum `kₓ = 4` so it wraps around within the 150-step run. Relative L² error holds at `~6·10⁻⁴` across all snapshots, including the frames after wrap-around — the periodic edge patches and periodic eigen-modes stitch together correctly across the seam.
+
+Under the hood: interior `N_c² + 2·N_c² · N_e` harmonic DOFs (no boundary to eliminate), 3-wide oversampled patches that wrap across the seam, and fine-reference DOF folding `(N_f+1)² → N_f²` via a gather-matrix `P` so `A ← P·A·P^T` imposes periodicity on the fine system.
+
+![wavepacket-periodic](figures/wavepacket_periodic.png)
+
+```python
+param = SemiclassicalParam(eps=0.3, V_fun=V, dt=1e-3, boundary="periodic")
+ts, frames, prop = run_expmsfem_schrodinger(
+    param, psi0, N_c=16, N_f=8, N_e=3, n_steps=150, save_stride=30, n_workers=4,
+)
+```
+
 ## Features
 
 | Problem                                      | Module                                  |
@@ -264,6 +286,7 @@ The `tests/` directory has convergence tests for every variant (periodic, random
 | Elliptic, high-contrast 64×             | 8     | 16    | 2.7e-2  (H¹)               | 2.8e-5  (H¹)      |
 | Helmholtz impedance, `k₀=2`             | 8     | 8     | 6.1e-4  (H¹)               | 6.2e-8  (H¹)      |
 | Schrödinger free Gaussian, `ε=0.5`      | 8     | 8     | 4.0e-3  (L²)               | 6.0e-7  (L²)      |
+| Schrödinger periodic V, `ε=0.3`         | 8     | 8     | 1.3e-2  (L²)               | 7.2e-5  (L²)      |
 
 ## Relevant papers
 
