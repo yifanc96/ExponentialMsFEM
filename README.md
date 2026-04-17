@@ -23,7 +23,7 @@ python3 -m venv .venv
 .venv/bin/python demos/run_all.py
 ```
 
-Always run scripts via `.venv/bin/python` (or activate the venv with `source .venv/bin/activate`) — the package is installed only inside that environment, so any other Python (e.g. a base Anaconda) will fail with `ModuleNotFoundError: No module named 'expmsfem'`. Runs `pytest` (65 tests, ~55 s) and regenerates the figure gallery.
+Always run scripts via `.venv/bin/python` (or activate the venv with `source .venv/bin/activate`) — the package is installed only inside that environment, so any other Python (e.g. a base Anaconda) will fail with `ModuleNotFoundError: No module named 'expmsfem'`. 
 
 ## Minimal example
 
