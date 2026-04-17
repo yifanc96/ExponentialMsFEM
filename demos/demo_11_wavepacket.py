@@ -39,11 +39,13 @@ from expmsfem.schrodinger.time_dep import (
 
 def main():
     set_style()
-    eps = 0.2
+    eps = 0.3
     dt = 1e-3
 
-    # Multiscale periodic "crystal" potential — oscillates at scale ε/kₓ = ε/2 ≈ 0.1
-    V0 = 20.0
+    # Multiscale periodic "crystal" potential — oscillates at scale ε/kₓ_V = 0.15.
+    # V0 is small compared to the wavepacket's kinetic energy kx²/2 = 8 below,
+    # so the wavepacket is a *travelling* scattering state, not a bound one.
+    V0 = 2.0
     kx_V, ky_V = 2.0, 2.0
     V = lambda x, y: V0 * (np.sin(np.pi * kx_V * x / eps) ** 2
                            + np.sin(np.pi * ky_V * y / eps) ** 2)
@@ -53,22 +55,25 @@ def main():
     xs = np.linspace(0, 1, N_fine + 1)
     X, Y = np.meshgrid(xs, xs, indexing="xy")
     sigma = 0.1
-    x0, y0, kx = 0.25, 0.5, 3.0
+    # Start at the left, moving right with momentum kx = 4 → group velocity 4.
+    x0, y0, kx = 0.2, 0.5, 4.0
     psi0 = (np.exp(-((X - x0) ** 2 + (Y - y0) ** 2) / (2 * sigma ** 2))
             * np.exp(1j * kx * X / eps)).ravel()
 
     param = SemiclassicalParam(eps=eps, V_fun=V, dt=dt)
-    n_steps = 80
+    # 150 steps × Δt = 0.15; packet crosses ~0.6 of the domain.
+    n_steps = 150
+    save_stride = 30
 
     print(f"[demo_11] wavepacket scattering through a multiscale V "
           f"(ε={eps}, Δt={dt}, N_c={N_c}, N_f={N_f}, N_e={N_e})")
     print("[demo_11] fine reference ...")
     ts_ref, frames_ref, B, M = solve_fine_backward_euler(
-        param, psi0, N_fine, n_steps, save_stride=20,
+        param, psi0, N_fine, n_steps, save_stride=save_stride,
     )
     print("[demo_11] ExpMsFEM ...")
     ts_ms, frames_ms, _ = run_expmsfem_schrodinger(
-        param, psi0, N_c, N_f, N_e, n_steps, save_stride=20, n_workers=4,
+        param, psi0, N_c, N_f, N_e, n_steps, save_stride=save_stride, n_workers=4,
     )
 
     for i, t in enumerate(ts_ms):
@@ -79,23 +84,23 @@ def main():
         ))
         print(f"  t = {t:.3f}  rel L2 = {rel:.2e}")
 
-    # Five columns: V(x), then 4 snapshot times (t=0, and 3 later frames)
-    snap_indices = [0, 2, 3, 4]
+    # Six columns: V(x) + 5 snapshot times at even spacing
+    snap_indices = [0, 1, 2, 3, 4, 5]
     V_grid = V(X, Y)
-    fig, axes = plt.subplots(2, 5, figsize=(21, 7.5))
+    fig, axes = plt.subplots(2, 6, figsize=(22, 7.5))
 
     # Column 0: V(x) (same in both rows — just show once)
     for row in range(2):
         ax = axes[row, 0]
         im = ax.pcolormesh(X, Y, V_grid, cmap="viridis", shading="auto")
-        ax.set_title(f"V(x) = {V0}·(sin²(π·2·x/ε) + sin²(π·2·y/ε))")
+        ax.set_title(f"V(x)  (V₀={V0}, period ε/2)")
         plt.colorbar(im, ax=ax, fraction=0.045, pad=0.03)
         ax.set_aspect("equal")
         ax.set_xlabel("$x_1$")
         ax.set_ylabel("$x_2$")
 
-    # Columns 1..4: |ψ|² snapshots, top = fine FEM, bottom = ExpMsFEM
-    for col_offset, idx in enumerate(snap_indices):
+    # Columns 1..5: |ψ|² snapshots, top = fine FEM, bottom = ExpMsFEM
+    for col_offset, idx in enumerate(snap_indices[1:]):
         col = col_offset + 1
         t = ts_ms[idx]
         ref_sq = np.abs(frames_ref[:, idx].reshape(N_fine + 1, N_fine + 1)) ** 2
