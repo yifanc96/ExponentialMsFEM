@@ -140,6 +140,30 @@ out = run_expmsfem(a, N_c=8, N_f=32, N_e=4, n_workers=4)
 
 The problem here is the scalar elliptic `-∇·(a ∇u) = f` with homogeneous Dirichlet on the box — **not** incompressible Navier–Stokes — but the geometric complexity and the adapted-basis story carry over to any PDE whose weak form is handled elementwise on a rectangular background mesh.
 
+### 11. Schrödinger eigenvalue problem
+
+The time-independent Schrödinger equation `H ψ = E ψ` with `H = -½ Δ + V(x)` on `[0, 1]²` with Dirichlet-0 BC maps onto the same ExpMsFEM skeleton. Two small extensions are needed:
+
+- The per-cell "stiffness" is the full Hamiltonian — kinetic term plus midpoint-rule `V(x)` mass — so the edge eigen-basis adapts to the *potential*, not just a diffusion coefficient.
+- Because the eigenvalue problem is homogeneous (no RHS), the elliptic edge-bubble / cell-bubble are replaced by **cell-interior Dirichlet eigenfunctions**: the lowest `K_int` eigenfunctions of `H_cell ψ_k = E_k M_cell ψ_k` with `ψ_k = 0` on the cell perimeter. Without these, eigenfunctions that peak strictly inside a coarse cell (e.g. a tight-binding state on a lattice site) have no representation in a boundary-supported basis, and the eigenvalue error plateaus regardless of `N_e`.
+
+Demo: lowest 4 eigenstates on a deep 4×4 Bloch lattice. `N_c = 8, N_f = 16, N_e = 3, K_int = 6` gives ~1% relative error on `E_0, …, E_3`:
+
+![schrodinger](figures/schrodinger.png)
+
+Validation against the analytic 2D harmonic oscillator `E_{n_x, n_y} = (n_x + n_y + 1) ω`: at `ω = 50, N_c = 8, N_f = 16`, sweeping `K_int` takes the ground-state error from ~5% (no interior modes) to **0.05%** at `K_int = 8`. Sweeping `N_e` at fixed `K_int` similarly tightens the coupling error.
+
+```python
+from expmsfem.schrodinger.potentials import V_harmonic_oscillator
+from expmsfem.schrodinger.driver import run_schrodinger_expmsfem
+
+V = lambda x, y: V_harmonic_oscillator(x, y, omega=50.0)
+out = run_schrodinger_expmsfem(V, N_c=8, N_f=16, N_e=3, K_int=6, k=6,
+                                n_workers=4)
+# out["E"]           — 6 lowest coarse eigenvalues
+# out["psi_ms_fine"] — reconstructed fine eigenfunctions, shape ((N_c*N_f+1)**2, 6)
+```
+
 ## Features
 
 | Problem                                      | Module                                  |
@@ -150,6 +174,7 @@ The problem here is the scalar elliptic `-∇·(a ∇u) = f` with homogeneous Di
 | Elliptic, perforated (fictitious-domain)     | `afun_perforated` + `run_expmsfem`      |
 | Elliptic, NACA 0012 airfoil in box far-field | `afun_naca0012` + `run_expmsfem`        |
 | Helmholtz impedance (complex, indefinite)    | `expmsfem.helmholtz.driver.run_expmsfem_helm` |
+| Schrödinger eigenvalue problem               | `expmsfem.schrodinger.driver.run_schrodinger_expmsfem` |
 | Baselines: `H+bubble`, `O(H)`                | `expmsfem.baselines`                    |
 
 Implementation highlights:
