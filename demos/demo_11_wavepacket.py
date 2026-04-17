@@ -1,16 +1,24 @@
-"""Time-dependent Schrödinger ExpMsFEM demo: Gaussian wavepacket propagation.
+"""Time-dependent Schrödinger ExpMsFEM demo: wavepacket scattering through
+a **multiscale potential**.
 
 Solves
-    i ε ∂_t ψ = -½ ε² Δ ψ + V(x) ψ,  ψ|_∂Ω = 0
-on `[0, 1]²` with `ε = 0.2`, free particle (V = 0), and a localised
-Gaussian wavepacket initial condition
+    i ε ∂_t ψ = −½ ε² Δ ψ + V(x) ψ,  ψ|_∂Ω = 0
+on `[0, 1]²` with `ε = 0.2`, backward Euler time step `Δt = 10⁻³`, over
+80 steps. The potential
 
-    ψ₀(x, y) = exp(-((x - 0.3)² + (y - 0.5)²) / (2 σ²)) exp(i k x / ε).
+    V(x, y) = V₀ · (sin²(π k_x x / ε) + sin²(π k_y y / ε))
 
-Time integration: backward Euler with `Δt = 10⁻³`, 50 steps. The figure
-shows 4 snapshots (`|ψ|²`) of the ExpMsFEM reconstruction side by side
-with the fine-FEM reference. The packet translates to the right and
-disperses; backward Euler dissipates high frequencies modestly.
+is a periodic "crystal" with oscillations at scale `ε / k_{x,y}` — exactly
+the kind of rough, sub-coarse-mesh potential that plain Q1 FEM on the
+coarse scale cannot resolve but that ExpMsFEM handles because the edge
+eigen-basis adapts to `V` through the shifted cell operator
+`−½ε² Δ + V − iε/Δt`.
+
+The figure has five columns. The leftmost panel is `V(x)` itself; the
+remaining four are `|ψ(t, x)|²` at four snapshot times. Top row is the
+fine-FEM reference, bottom row is the ExpMsFEM reconstruction on a coarse
+`N_c = 16, N_f = 8, N_e = 3` mesh. The wavepacket is launched from the
+left with momentum along `+x` and diffracts through the lattice.
 
 Writes figures/wavepacket.png.
 """
@@ -33,30 +41,36 @@ def main():
     set_style()
     eps = 0.2
     dt = 1e-3
-    V = lambda x, y: np.zeros_like(np.asarray(x) * np.asarray(y))
+
+    # Multiscale periodic "crystal" potential — oscillates at scale ε/kₓ = ε/2 ≈ 0.1
+    V0 = 20.0
+    kx_V, ky_V = 2.0, 2.0
+    V = lambda x, y: V0 * (np.sin(np.pi * kx_V * x / eps) ** 2
+                           + np.sin(np.pi * ky_V * y / eps) ** 2)
 
     N_c, N_f, N_e = 16, 8, 3
     N_fine = N_c * N_f
     xs = np.linspace(0, 1, N_fine + 1)
     X, Y = np.meshgrid(xs, xs, indexing="xy")
     sigma = 0.1
-    x0, y0, kx = 0.3, 0.5, 3.0
+    x0, y0, kx = 0.25, 0.5, 3.0
     psi0 = (np.exp(-((X - x0) ** 2 + (Y - y0) ** 2) / (2 * sigma ** 2))
             * np.exp(1j * kx * X / eps)).ravel()
 
     param = SemiclassicalParam(eps=eps, V_fun=V, dt=dt)
-    n_steps = 50
+    n_steps = 80
 
+    print(f"[demo_11] wavepacket scattering through a multiscale V "
+          f"(ε={eps}, Δt={dt}, N_c={N_c}, N_f={N_f}, N_e={N_e})")
     print("[demo_11] fine reference ...")
     ts_ref, frames_ref, B, M = solve_fine_backward_euler(
-        param, psi0, N_fine, n_steps, save_stride=10,
+        param, psi0, N_fine, n_steps, save_stride=20,
     )
-    print(f"[demo_11] ExpMsFEM  (N_c={N_c}, N_f={N_f}, N_e={N_e}) ...")
+    print("[demo_11] ExpMsFEM ...")
     ts_ms, frames_ms, _ = run_expmsfem_schrodinger(
-        param, psi0, N_c, N_f, N_e, n_steps, save_stride=10, n_workers=4,
+        param, psi0, N_c, N_f, N_e, n_steps, save_stride=20, n_workers=4,
     )
 
-    # Print L² error for each snapshot
     for i, t in enumerate(ts_ms):
         e = frames_ref[:, i] - frames_ms[:, i]
         rel = float(np.sqrt(
@@ -65,36 +79,43 @@ def main():
         ))
         print(f"  t = {t:.3f}  rel L2 = {rel:.2e}")
 
-    # Render |ψ|² snapshots for 4 selected times
-    snap_indices = [0, 2, 4, 5]
-    fig, axes = plt.subplots(2, 4, figsize=(17, 7.5))
-    for col, idx in enumerate(snap_indices):
+    # Five columns: V(x), then 4 snapshot times (t=0, and 3 later frames)
+    snap_indices = [0, 2, 3, 4]
+    V_grid = V(X, Y)
+    fig, axes = plt.subplots(2, 5, figsize=(21, 7.5))
+
+    # Column 0: V(x) (same in both rows — just show once)
+    for row in range(2):
+        ax = axes[row, 0]
+        im = ax.pcolormesh(X, Y, V_grid, cmap="viridis", shading="auto")
+        ax.set_title(f"V(x) = {V0}·(sin²(π·2·x/ε) + sin²(π·2·y/ε))")
+        plt.colorbar(im, ax=ax, fraction=0.045, pad=0.03)
+        ax.set_aspect("equal")
+        ax.set_xlabel("$x_1$")
+        ax.set_ylabel("$x_2$")
+
+    # Columns 1..4: |ψ|² snapshots, top = fine FEM, bottom = ExpMsFEM
+    for col_offset, idx in enumerate(snap_indices):
+        col = col_offset + 1
         t = ts_ms[idx]
         ref_sq = np.abs(frames_ref[:, idx].reshape(N_fine + 1, N_fine + 1)) ** 2
         ms_sq = np.abs(frames_ms[:, idx].reshape(N_fine + 1, N_fine + 1)) ** 2
         vmax = max(ref_sq.max(), ms_sq.max())
 
-        ax_ref = axes[0, col]
-        im = ax_ref.pcolormesh(X, Y, ref_sq, cmap="magma",
-                               shading="auto", vmin=0, vmax=vmax)
-        ax_ref.set_title(f"fine FEM  |ψ|², t = {t:.3f}")
-        plt.colorbar(im, ax=ax_ref, fraction=0.045, pad=0.03)
-        ax_ref.set_aspect("equal")
-        ax_ref.set_xlabel("$x_1$")
-        ax_ref.set_ylabel("$x_2$")
-
-        ax_ms = axes[1, col]
-        im = ax_ms.pcolormesh(X, Y, ms_sq, cmap="magma",
-                              shading="auto", vmin=0, vmax=vmax)
-        ax_ms.set_title(f"ExpMsFEM  |ψ|², t = {t:.3f}")
-        plt.colorbar(im, ax=ax_ms, fraction=0.045, pad=0.03)
-        ax_ms.set_aspect("equal")
-        ax_ms.set_xlabel("$x_1$")
-        ax_ms.set_ylabel("$x_2$")
+        for row, Z, label in [(0, ref_sq, "fine FEM"),
+                              (1, ms_sq, "ExpMsFEM")]:
+            ax = axes[row, col]
+            im = ax.pcolormesh(X, Y, Z, cmap="magma", shading="auto",
+                               vmin=0, vmax=vmax)
+            ax.set_title(f"{label}  |ψ|², t = {t:.3f}")
+            plt.colorbar(im, ax=ax, fraction=0.045, pad=0.03)
+            ax.set_aspect("equal")
+            ax.set_xlabel("$x_1$")
+            ax.set_ylabel("$x_2$")
 
     fig.suptitle(
-        f"Time-dependent Schrödinger: Gaussian wavepacket "
-        f"(ε={eps}, Δt={dt}, N_c={N_c}, N_f={N_f}, N_e={N_e})",
+        "Time-dependent Schrödinger with a multiscale potential: "
+        f"wavepacket scattering (ε={eps}, Δt={dt})",
         y=1.01, fontsize=13,
     )
     save(fig, "wavepacket.png")

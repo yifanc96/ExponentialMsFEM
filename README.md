@@ -150,19 +150,25 @@ out = run_expmsfem(a, N_c=8, N_f=32, N_e=4, n_workers=4)
 
 The problem here is the scalar elliptic `-∇·(a ∇u) = f` with homogeneous Dirichlet on the box — **not** incompressible Navier–Stokes — but the geometric complexity and the adapted-basis story carry over to any PDE whose weak form is handled elementwise on a rectangular background mesh.
 
-### 11. Time-dependent Schrödinger (semi-classical, backward Euler)
+### 11. Time-dependent Schrödinger with a multiscale potential (semi-classical, backward Euler)
 
 The semi-classical Schrödinger equation on `Ω = (0, 1)²`
 
-`i ε ∂_t ψ = −½ ε² Δ ψ + V(x) ψ, ψ|_∂Ω = 0`
+`i ε ∂_t ψ = −½ ε² Δ ψ + V(x) ψ,   ψ|_∂Ω = 0`,
 
-is discretised in time by backward Euler; each step is a linear complex-indefinite elliptic solve,
+where `V(x)` is a real scalar **potential** — possibly rough, oscillatory, or with microstructure at scales comparable to or smaller than the coarse mesh `H = 1/N_c`. This is the regime ExpMsFEM is designed for: the edge eigen-basis adapts to the cell-level operator `H_cell = −½ε² Δ + V`, so even a `V` that oscillates faster than `H` is captured at the coarse level.
+
+Time integration: backward Euler. Each step is a linear complex-indefinite elliptic solve,
 
 `( −½ ε² Δ + V − iε/Δt ) · ψ_{n+1} = −iε/Δt · ψ_n`,
 
-which fits the classical ExpMsFEM framework exactly. The complex-symmetric shifted operator plays the role of the cell stiffness; the harmonic-bubble decomposition of the coarse-basis vs cell-bubble parts decouples the Galerkin problem. The offline phase (per-cell UMFPACK factors, edge eigen-basis) is built **once** when `Δt` is held fixed — every time step is then a cheap online coarse solve plus per-cell bubble correction.
+which fits the classical ExpMsFEM framework exactly. The complex-symmetric shifted operator plays the role of the cell stiffness; the harmonic-bubble decomposition decouples the Galerkin problem (harmonic coarse coefficients + RHS-driven cell bubbles). When `Δt` is held fixed, the offline phase (per-cell UMFPACK factors of the shifted operator + edge eigen-basis) is built **once** — every time step is then a cheap online coarse solve plus a per-cell bubble correction driven by `ψ_n`.
 
-The demo below shows a Gaussian wavepacket propagating with `ε = 0.2`, `Δt = 10⁻³` over 50 steps. Top row: fine-FEM reference `|ψ|²`. Bottom row: ExpMsFEM reconstruction `|ψ|²` on `N_c = 16, N_f = 8, N_e = 3`. Relative L² error stays `~2·10⁻⁴` across the whole run.
+The demo below solves this problem with a periodic "crystal" potential
+
+`V(x, y) = 20 · ( sin²(π · 2 · x / ε) + sin²(π · 2 · y / ε) )`
+
+that oscillates at scale `ε / 2` — smaller than the coarse mesh `H = 1/16` used by ExpMsFEM. A Gaussian wavepacket is launched from the left with momentum along `+x` and scatters / diffracts through the lattice. Top row of the figure: `V(x)` (repeated) and the fine-FEM reference `|ψ(t, x)|²` at four snapshot times. Bottom row: the same snapshots reconstructed by ExpMsFEM on `N_c = 16, N_f = 8, N_e = 3`. Relative L² error stays `~10⁻⁴` across the run, even though the coarse mesh does not resolve the crystal oscillations.
 
 ![wavepacket](figures/wavepacket.png)
 
@@ -171,18 +177,22 @@ import numpy as np
 from expmsfem.schrodinger.time_dep import SemiclassicalParam, run_expmsfem_schrodinger
 
 eps, dt = 0.2, 1e-3
-V = lambda x, y: np.zeros_like(np.asarray(x) * np.asarray(y))
+# Multiscale potential — oscillates at the ε/2 scale.
+V0 = 20.0
+V = lambda x, y: V0 * (np.sin(np.pi * 2.0 * x / eps) ** 2
+                       + np.sin(np.pi * 2.0 * y / eps) ** 2)
+
 N_c, N_f = 16, 8
 xs = np.linspace(0, 1, N_c * N_f + 1)
 X, Y = np.meshgrid(xs, xs, indexing="xy")
-psi0 = (np.exp(-((X - 0.3)**2 + (Y - 0.5)**2) / (2 * 0.1**2))
+psi0 = (np.exp(-((X - 0.25)**2 + (Y - 0.5)**2) / (2 * 0.1**2))
         * np.exp(1j * 3.0 * X / eps)).ravel()
 
 param = SemiclassicalParam(eps=eps, V_fun=V, dt=dt)
 ts, frames, prop = run_expmsfem_schrodinger(
-    param, psi0, N_c, N_f, N_e=3, n_steps=50, save_stride=10, n_workers=4,
+    param, psi0, N_c, N_f, N_e=3, n_steps=80, save_stride=20, n_workers=4,
 )
-# frames[:, i] is ψ at time ts[i] on the (N_c·N_f + 1)² fine grid
+# frames[:, i] is ψ at time ts[i] on the (N_c·N_f + 1)² fine grid.
 ```
 
 ## Features
