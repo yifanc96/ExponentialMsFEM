@@ -73,11 +73,21 @@ Fine-FEM reference vs ExpMsFEM reconstruction on the periodic coefficient, with 
 
 ![solution](figures/solution.png)
 
-### 4. Method comparison
+### 4. Method comparison: Exp vs H+bubble vs O(H)
 
-Exp (full ExpMsFEM) vs H+bubble (edge eigenmodes + cell bubble, no edge bubble) vs O(H) (edge eigenmodes only, no bubble). Only ExpMsFEM shows the exponential rate; the two baselines stall.
+Three multiscale methods, all using the same coarse mesh and all solving the same elliptic problem:
+
+| Method       | Per-cell basis                                          | What's captured                                  |
+|--------------|---------------------------------------------------------|--------------------------------------------------|
+| **Exp**      | 4 nodal hats + `N_e` edge eigen-modes **+ 1 edge bubble** per edge **+ 1 cell bubble**  | harmonic (edge) + bubble (interior); exponential-in-`N_e` convergence |
+| **H+bubble** | 4 nodal hats + `N_e` edge eigen-modes + 1 cell bubble (no edge bubble)     | harmonic edges with the bubble glued on; algebraic rate |
+| **O(H)**     | 4 nodal hats + `N_e` edge eigen-modes only                              | harmonic edges alone; can't resolve the RHS-driven interior — stalls at `O(H)` |
+
+The "cell bubble" is the particular solution of `−∇·(a∇u) = f` on one cell with zero perimeter data; the "edge bubble" is the trace of the analogous oversampled-patch bubble extended back into each cell. Both are RHS-driven basis functions — they live in the **bubble subspace** of the harmonic-bubble decomposition.
 
 ![method_comparison](figures/method_comparison.png)
+
+Only Exp's error drops exponentially with `N_e`; H+bubble improves algebraically, O(H) stalls near its initial value.
 
 ### 5. Eigenvalue decay — the *why*
 
@@ -140,28 +150,39 @@ out = run_expmsfem(a, N_c=8, N_f=32, N_e=4, n_workers=4)
 
 The problem here is the scalar elliptic `-∇·(a ∇u) = f` with homogeneous Dirichlet on the box — **not** incompressible Navier–Stokes — but the geometric complexity and the adapted-basis story carry over to any PDE whose weak form is handled elementwise on a rectangular background mesh.
 
-### 11. Schrödinger eigenvalue problem
+### 11. Time-dependent Schrödinger (semi-classical, backward Euler)
 
-The time-independent Schrödinger equation `H ψ = E ψ` with `H = -½ Δ + V(x)` on `[0, 1]²` with Dirichlet-0 BC maps onto the same ExpMsFEM skeleton. Two small extensions are needed:
+The semi-classical Schrödinger equation on `Ω = (0, 1)²`
 
-- The per-cell "stiffness" is the full Hamiltonian — kinetic term plus midpoint-rule `V(x)` mass — so the edge eigen-basis adapts to the *potential*, not just a diffusion coefficient.
-- Because the eigenvalue problem is homogeneous (no RHS), the elliptic edge-bubble / cell-bubble are replaced by **cell-interior Dirichlet eigenfunctions**: the lowest `K_int` eigenfunctions of `H_cell ψ_k = E_k M_cell ψ_k` with `ψ_k = 0` on the cell perimeter. Without these, eigenfunctions that peak strictly inside a coarse cell (e.g. a tight-binding state on a lattice site) have no representation in a boundary-supported basis, and the eigenvalue error plateaus regardless of `N_e`.
+`i ε ∂_t ψ = −½ ε² Δ ψ + V(x) ψ, ψ|_∂Ω = 0`
 
-Demo: lowest 4 eigenstates on a deep 4×4 Bloch lattice. `N_c = 8, N_f = 16, N_e = 3, K_int = 6` gives ~1% relative error on `E_0, …, E_3`:
+is discretised in time by backward Euler; each step is a linear complex-indefinite elliptic solve,
 
-![schrodinger](figures/schrodinger.png)
+`( −½ ε² Δ + V − iε/Δt ) · ψ_{n+1} = −iε/Δt · ψ_n`,
 
-Validation against the analytic 2D harmonic oscillator `E_{n_x, n_y} = (n_x + n_y + 1) ω`: at `ω = 50, N_c = 8, N_f = 16`, sweeping `K_int` takes the ground-state error from ~5% (no interior modes) to **0.05%** at `K_int = 8`. Sweeping `N_e` at fixed `K_int` similarly tightens the coupling error.
+which fits the classical ExpMsFEM framework exactly. The complex-symmetric shifted operator plays the role of the cell stiffness; the harmonic-bubble decomposition of the coarse-basis vs cell-bubble parts decouples the Galerkin problem. The offline phase (per-cell UMFPACK factors, edge eigen-basis) is built **once** when `Δt` is held fixed — every time step is then a cheap online coarse solve plus per-cell bubble correction.
+
+The demo below shows a Gaussian wavepacket propagating with `ε = 0.2`, `Δt = 10⁻³` over 50 steps. Top row: fine-FEM reference `|ψ|²`. Bottom row: ExpMsFEM reconstruction `|ψ|²` on `N_c = 16, N_f = 8, N_e = 3`. Relative L² error stays `~2·10⁻⁴` across the whole run.
+
+![wavepacket](figures/wavepacket.png)
 
 ```python
-from expmsfem.schrodinger.potentials import V_harmonic_oscillator
-from expmsfem.schrodinger.driver import run_schrodinger_expmsfem
+import numpy as np
+from expmsfem.schrodinger.time_dep import SemiclassicalParam, run_expmsfem_schrodinger
 
-V = lambda x, y: V_harmonic_oscillator(x, y, omega=50.0)
-out = run_schrodinger_expmsfem(V, N_c=8, N_f=16, N_e=3, K_int=6, k=6,
-                                n_workers=4)
-# out["E"]           — 6 lowest coarse eigenvalues
-# out["psi_ms_fine"] — reconstructed fine eigenfunctions, shape ((N_c*N_f+1)**2, 6)
+eps, dt = 0.2, 1e-3
+V = lambda x, y: np.zeros_like(np.asarray(x) * np.asarray(y))
+N_c, N_f = 16, 8
+xs = np.linspace(0, 1, N_c * N_f + 1)
+X, Y = np.meshgrid(xs, xs, indexing="xy")
+psi0 = (np.exp(-((X - 0.3)**2 + (Y - 0.5)**2) / (2 * 0.1**2))
+        * np.exp(1j * 3.0 * X / eps)).ravel()
+
+param = SemiclassicalParam(eps=eps, V_fun=V, dt=dt)
+ts, frames, prop = run_expmsfem_schrodinger(
+    param, psi0, N_c, N_f, N_e=3, n_steps=50, save_stride=10, n_workers=4,
+)
+# frames[:, i] is ψ at time ts[i] on the (N_c·N_f + 1)² fine grid
 ```
 
 ## Features
@@ -174,15 +195,30 @@ out = run_schrodinger_expmsfem(V, N_c=8, N_f=16, N_e=3, K_int=6, k=6,
 | Elliptic, perforated (fictitious-domain)     | `afun_perforated` + `run_expmsfem`      |
 | Elliptic, NACA 0012 airfoil in box far-field | `afun_naca0012` + `run_expmsfem`        |
 | Helmholtz impedance (complex, indefinite)    | `expmsfem.helmholtz.driver.run_expmsfem_helm` |
-| Schrödinger eigenvalue problem               | `expmsfem.schrodinger.driver.run_schrodinger_expmsfem` |
+| Time-dependent Schrödinger (backward Euler)  | `expmsfem.schrodinger.time_dep.run_expmsfem_schrodinger` |
 | Baselines: `H+bubble`, `O(H)`                | `expmsfem.baselines`                    |
 
-Implementation highlights:
+### Harmonic-bubble decomposition — the organising principle
+
+Every basis in this package is organised around one decomposition: on each coarse cell any fine-scale function `u` splits uniquely as
+
+`u = u_harm + u_bub`, with `u_harm` discrete-harmonic (satisfies `A u = 0` on interior DOFs, with given perimeter data) and `u_bub` a bubble (zero on the perimeter).
+
+For complex-symmetric `A` — elliptic, Helmholtz, or the Schrödinger shifted operator — the two pieces are **A-orthogonal** in the transpose pairing `u^T A v = 0`. The consequence:
+
+- **Harmonic subspace** ≈ 4 nodal hats + `N_e` edge eigen-modes per edge. The edges are where the eigen-truncation gives exponential convergence.
+- **Bubble subspace** ≈ 1 edge bubble per edge + 1 cell bubble (RHS-driven particular solutions). For a homogeneous problem these collapse to zero; for a driven one they carry the entire forcing.
+- **Online Galerkin** decouples: the coarse harmonic coefficients solve `A_coarse · c = (value^T · f)`, and the bubble is read off separately per cell.
+
+Every variant below instantiates this skeleton with a different operator `A`.
+
+### Implementation highlights
 
 - **Parallel offline**: `Workspace.prefactor_all()` factorises every cell and every interior-edge patch in a thread pool (embarrassingly parallel, 3–4× speedup measured).
 - **Partial eigensolves**: per-edge generalised eigenproblem solved with `scipy.linalg.eigh(subset_by_index=...)`, keeping only the top `N_e` modes.
 - **Edge-data cache**: per-interior-edge `(L₁RV, L₂RV, L₁·bub, L₂·bub)` computed once and shared by both adjacent cells.
 - **Complex variant**: Helmholtz uses the sesquilinear Matlab convention `K = value.T · B · conj(value)` with the transpose solve `A.T \ F`; both UMFPACK factors of `A_ii` and `A_ii.T` are cached so online solves are fast.
+- **Time-dependent Schrödinger** reuses the same skeleton with the complex-symmetric shifted operator `−½ε²Δ + V − iε/Δt`; when `Δt` is held fixed, the offline factor is built once and every time step is an O(coarse-DOFs) back-substitution.
 
 ## Validation
 
