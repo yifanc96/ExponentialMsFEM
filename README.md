@@ -91,6 +91,37 @@ Real and imaginary parts of the multiscale solution on the case-1 Helmholtz prob
 
 ![helmholtz_field](figures/helmholtz_field.png)
 
+### 7. What the basis actually looks like
+
+Six panels on a single interior coarse cell for the 5-scale periodic coefficient: two nodal-hat basis functions (Q1-harmonic, visibly adapted to the local `a(x)` rather than piecewise-linear), the top three edge eigen-modes on one shared edge (ranked by `(R^T N R, P)` eigenvalue — note how they become more oscillatory), and the per-cell bubble (Dirichlet-0 solve with constant RHS).
+
+![basis](figures/basis.png)
+
+### 8. Why multiscale beats plain FEM on rough coefficients
+
+The 5-scale periodic `a(x)` has its finest oscillation period at `1/65`. A plain Q1 FEM on an `N × N` grid can't see anything below its own mesh, so for `N < 65` the solution has an O(1) resonance error that does **not** shrink with refinement. ExpMsFEM on the same coarse grid builds a problem-adapted basis from fine-scale local solves — at every mesh size it beats plain FEM by three to thirteen orders of magnitude in H¹.
+
+![fem_vs_expmsfem](figures/fem_vs_expmsfem.png)
+
+> **Note on the ExpMsFEM curve.** The sweep keeps `N_c · N_f = 128` fixed (so the underlying fine resolution is constant) and varies the `(N_c, N_f)` trade-off at fixed `N_e = 3`. Small `N_c` means large fine sub-cells: each cell's nodal + edge basis almost spans the full fine-scale solution there, so the error is dominated by the edge stitching between only a few cells — which `N_e = 3` handles essentially to machine precision. Larger `N_c` means smaller fine sub-cells and many more edges to stitch; at `N_e = 3` a larger fraction of the edge information is discarded and the error rises. The clean exponential-in-`N_e` picture at fixed `N_c` is what the *Exponential convergence* panel above shows.
+
+### 9. Perforated / complicated domains (fictitious-domain coefficient)
+
+Geometric complexity enters the method through `a(x)` — we don't need to change the rectangular background mesh. Set `a = 1` in the bulk and `a = 10^{-6}` inside each hole; as the contrast grows, the holes become approximate Dirichlet-zero regions and the configuration converges to the classical perforated-domain problem. The edge eigen-basis automatically adapts to the high-contrast jumps at every hole boundary, so ExpMsFEM stays well-conditioned and low-DOF.
+
+The demo uses 16 circular holes on a 4×4 lattice with `10^6`× contrast; `N_c = 8`, `N_f = 16`, `N_e = 4` gives relative H¹ error ~`5e-7` vs the fine-FEM reference.
+
+![perforated](figures/perforated.png)
+
+```python
+from expmsfem.coefficients import afun_perforated, default_hole_lattice
+from expmsfem.driver import run_expmsfem
+
+centers = default_hole_lattice(n_per_side=4, margin=0.15)
+a = afun_perforated(centers, hole_radius=0.07, a_out=1.0, a_in=1e-6)
+out = run_expmsfem(a, N_c=8, N_f=16, N_e=4, n_workers=4)
+```
+
 ## Features
 
 | Problem                                      | Module                                  |
@@ -98,6 +129,7 @@ Real and imaginary parts of the multiscale solution on the case-1 Helmholtz prob
 | Elliptic, periodic coefficient               | `expmsfem.driver.run_expmsfem`          |
 | Elliptic, random rough coefficient           | `afun_random` + `run_expmsfem`          |
 | Elliptic, high-contrast channel coefficient  | `afun_highcontrast` + `run_expmsfem`    |
+| Elliptic, perforated (fictitious-domain)     | `afun_perforated` + `run_expmsfem`      |
 | Helmholtz impedance (complex, indefinite)    | `expmsfem.helmholtz.driver.run_expmsfem_helm` |
 | Baselines: `H+bubble`, `O(H)`                | `expmsfem.baselines`                    |
 

@@ -131,3 +131,48 @@ def afun_highcontrast(x, y):
         float(HIGH_CONTRAST_CONTRAST),
     )
     return a.reshape(shape)
+
+
+# -----------------------------------------------------------------------------
+# Perforated / complicated-geometry coefficient
+# -----------------------------------------------------------------------------
+
+
+def afun_perforated(hole_centers: np.ndarray, hole_radius: float,
+                    a_out: float = 1.0, a_in: float = 1e-6):
+    """Factory: returns a callable `a(x, y)` that approximates a perforated
+    domain via a piecewise coefficient — `a_out` in the bulk material,
+    `a_in` (very small by default) inside each hole. Holes are discs of
+    radius `hole_radius` centred on `hole_centers` (shape `(n_holes, 2)`).
+
+    With `a_in / a_out → 0` the tiny-diffusion regions become an approximate
+    Dirichlet-zero trace on the hole boundaries, giving the classical
+    perforated-domain problem in the limit (a standard "fictitious domain"
+    reformulation). The ExpMsFEM pipeline handles this without modifying the
+    rectangular background mesh — the edge eigenbasis adapts automatically
+    to the high-contrast jumps at every hole boundary.
+    """
+    hole_centers = np.asarray(hole_centers, dtype=np.float64)
+    assert hole_centers.ndim == 2 and hole_centers.shape[1] == 2
+
+    def a(x, y):
+        x = np.asarray(x, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+        shape = x.shape
+        x_flat = x.ravel()
+        y_flat = y.ravel()
+        dx = x_flat[:, None] - hole_centers[None, :, 0]
+        dy = y_flat[:, None] - hole_centers[None, :, 1]
+        d2 = dx * dx + dy * dy
+        inside_any = d2.min(axis=1) < hole_radius ** 2
+        return np.where(inside_any, a_in, a_out).reshape(shape)
+
+    return a
+
+
+def default_hole_lattice(n_per_side: int = 4, margin: float = 0.125) -> np.ndarray:
+    """Convenience: `(n_per_side**2, 2)` hole centres on a regular lattice
+    inset by `margin` from the edges of `[0, 1]²`."""
+    pts = np.linspace(margin, 1 - margin, n_per_side)
+    X, Y = np.meshgrid(pts, pts, indexing="xy")
+    return np.stack([X.ravel(), Y.ravel()], axis=-1)
