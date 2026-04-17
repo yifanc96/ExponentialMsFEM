@@ -166,11 +166,11 @@ which fits the classical ExpMsFEM framework exactly. The complex-symmetric shift
 
 The demo below solves this problem with a **periodic "crystal" potential**
 
-`V(x, y) = 2 · ( sin²(π · 2 · x / ε) + sin²(π · 2 · y / ε) )`
+`V(x, y) = 2 · ( sin²(π · 8 · x / ε) + sin²(π · 8 · y / ε) )`
 
-that oscillates at scale `ε / 2 = 0.15` — **smaller** than the coarse mesh `H = 1/16 ≈ 0.0625` used by ExpMsFEM. A Gaussian wavepacket is launched from the left at `x₀ = 0.2, y₀ = 0.5` with momentum `kₓ = 4` along `+x` (kinetic energy `kₓ² / 2 = 8`, well above the potential maximum `V_max = 4`), so the packet *travels* across the lattice while diffracting off the periodic structure.
+that oscillates at period `ε / 8 = 0.0375` — **genuinely below** the coarse mesh `H = 1/16 = 0.0625` used by ExpMsFEM (roughly 1.67 crystal periods per coarse cell). A Gaussian wavepacket is launched from `x₀ = 0.2, y₀ = 0.5` with momentum `kₓ = 4` along `+x` (kinetic energy `kₓ² / 2 = 8`, well above the potential maximum `V_max = 4`), so the packet *travels* across the lattice while diffracting off the sub-mesh periodic structure.
 
-Left column of the figure: `V(x)` (the multiscale crystal). Columns 2–6: `|ψ(t, x)|²` at five evenly-spaced snapshot times from `t = 0.03` to `t = 0.15`. Top row is the fine-FEM reference, bottom row is the ExpMsFEM reconstruction on `N_c = 16, N_f = 8, N_e = 3`. The packet clearly propagates to the right and spreads into a diffraction-like envelope. Relative L² error stays `~2·10⁻⁴` across the whole run, even though the coarse mesh does not resolve the crystal oscillations.
+Left column of the figure: `V(x)` (the multiscale crystal). Columns 2–6: `|ψ(t, x)|²` at five evenly-spaced snapshot times from `t = 0.03` to `t = 0.15`. Top row is the fine-FEM reference, bottom row is the ExpMsFEM reconstruction on `N_c = 16, N_f = 8, N_e = 3`. The packet clearly propagates to the right and spreads into a diffraction-like envelope. Relative L² error stays `~2·10⁻⁴` across the whole run, even though the coarse mesh by itself cannot resolve the crystal oscillations — the edge eigen-basis picks up the sub-`H` structure via the shifted cell operator.
 
 ![wavepacket](figures/wavepacket.png)
 
@@ -179,10 +179,10 @@ import numpy as np
 from expmsfem.schrodinger.time_dep import SemiclassicalParam, run_expmsfem_schrodinger
 
 eps, dt = 0.3, 1e-3
-# Multiscale potential — oscillates at scale ε/2 = 0.15, smaller than H = 1/16.
-V0 = 2.0
-V = lambda x, y: V0 * (np.sin(np.pi * 2.0 * x / eps) ** 2
-                       + np.sin(np.pi * 2.0 * y / eps) ** 2)
+# Multiscale potential — oscillates at period ε/8 = 0.0375, smaller than H = 1/16.
+V0, k_V = 2.0, 8.0
+V = lambda x, y: V0 * (np.sin(np.pi * k_V * x / eps) ** 2
+                       + np.sin(np.pi * k_V * y / eps) ** 2)
 
 N_c, N_f = 16, 8
 xs = np.linspace(0, 1, N_c * N_f + 1)

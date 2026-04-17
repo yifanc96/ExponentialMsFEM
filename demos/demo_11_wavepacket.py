@@ -42,11 +42,13 @@ def main():
     eps = 0.3
     dt = 1e-3
 
-    # Multiscale periodic "crystal" potential — oscillates at scale ε/kₓ_V = 0.15.
-    # V0 is small compared to the wavepacket's kinetic energy kx²/2 = 8 below,
-    # so the wavepacket is a *travelling* scattering state, not a bound one.
+    # Genuinely multiscale periodic "crystal" potential: V oscillates at period
+    # ε/k_V = 0.3 / 8 = 0.0375, strictly below the coarse mesh size
+    # H = 1/N_c = 1/16 ≈ 0.0625 used by ExpMsFEM.  V0 is small compared to the
+    # wavepacket's kinetic energy kₓ²/2 = 8 below, so the wavepacket is a
+    # *travelling* scattering state, not a bound one.
     V0 = 2.0
-    kx_V, ky_V = 2.0, 2.0
+    kx_V, ky_V = 8.0, 8.0
     V = lambda x, y: V0 * (np.sin(np.pi * kx_V * x / eps) ** 2
                            + np.sin(np.pi * ky_V * y / eps) ** 2)
 
@@ -93,7 +95,7 @@ def main():
     for row in range(2):
         ax = axes[row, 0]
         im = ax.pcolormesh(X, Y, V_grid, cmap="viridis", shading="auto")
-        ax.set_title(f"V(x)  (V₀={V0}, period ε/2)")
+        ax.set_title(f"V(x)  (V₀={V0}, period ε/{int(kx_V)}={eps/kx_V:.4f})")
         plt.colorbar(im, ax=ax, fraction=0.045, pad=0.03)
         ax.set_aspect("equal")
         ax.set_xlabel("$x_1$")
