@@ -4,11 +4,13 @@ Exponentially convergent multiscale finite element methods in Julia.
 
 ## Status
 
-- FEM (`FEMsolver.jl`, `FEMutility.jl`): finished.
-- MsFEM (`MsFEMsolver.jl`, `MsFEMutility.jl`): finished.
-- ExpMsFEM (`ExponentialMsFEMsolver.jl`, `ExponentialMsFEMutility.jl`): finished on this `julia-code` branch.
+- FEM and MsFEM on `Elliptic/`: finished.
+- ExpMsFEM on `Elliptic/` (elliptic elliptic variable-coefficient problem): finished on this `julia-code` branch.
+- ExpMsFEM on `Helmholtz/` (2D impedance Helmholtz problem): finished on this `julia-code` branch.
 
-## Layout (`Elliptic/`)
+## Layout
+
+### `Elliptic/`
 
 - `PDEstruct.jl` — `VarElliptic` PDE data container (`a`, `rhs`, boundary handlers).
 - `FEMutility.jl` / `FEMsolver.jl` — fine-scale Q1 reference solver on a uniform rectangular grid.
@@ -23,17 +25,31 @@ Exponentially convergent multiscale finite element methods in Julia.
   - `ExpMsFEM_ElementBasis` / `ExpMsFEM_GlobalAssembly` / `ExpMsFEM_FineConstruct` / `ExpMsFEM_Solver` — full pipeline.
 - `ExponentialMsFEMsolver.jl` — driver reproducing the Matlab `main.m` workflow on the 5-scale periodic coefficient with a manufactured solution `u = sin(2πx)·sin(πy)·exp(x + 2y)`.
 
+### `Helmholtz/`
+
+- `PDEstruct.jl` — `Helmholtz2D` PDE container (`k0`, `afun`, `vfun`, `betafun`, `ffun`, `gfun`) for `-∇·(a∇u) - k₀²v²u = f` on `(0,1)²` with impedance BC `∂u/∂n + ik₀βu = g`.
+- `ExponentialMsFEMutility.jl` — complex-valued port of the elliptic utilities:
+  - Per-fine-cell complex Q1 stiffness with position-dependent impedance term; real norm matrix `B_ref` for the energy error.
+  - `helm_dirichlet_indices` (corresponds to Matlab `bc.m`) — excludes ∂Ω sides from local Dirichlet sets so the Robin BC stays in the system.
+  - `ComplexInteriorFactor` carries both the LU and the transpose-LU since Matlab solves `A.' \ F` (non-conjugate transpose).
+  - `helm_basefun` / `helm_basefun1` / `helm_bubble` / `helm_harmext` / `helm_restrict` — complex analogues of the elliptic routines.
+  - `helm_ElementBasis` uses analytical Q1 hat values to build Dirichlet data for the nodal basis (replaces Matlab's 9-branch corner/edge/interior case split with one formula).
+  - Sesquilinear forms: `K = value.' * B * conj(value)`, `f = value' * F_fine`, global `u = A.' \ F`.
+- `ExponentialMsFEMsolver.jl` — driver reproducing Matlab `helmholtz/case1/Exp/main.m` at `N_c = N_f = 8`, `k₀ = 2` with a per-side plane-wave impedance load.
+
 ## Usage
 
 ```bash
 julia -t 4 Elliptic/ExponentialMsFEMsolver.jl
+julia -t 4 Helmholtz/ExponentialMsFEMsolver.jl
 ```
 
 Controlled by environment variables (defaults in parentheses):
 
-- `EXPMSFEM_NCE`  — coarse cells per dimension (8)
-- `EXPMSFEM_NFE`  — fine cells per coarse cell (8)
-- `EXPMSFEM_NE_MAX` — max number of edge eigenmodes per edge (5)
+- `EXPMSFEM_NCE`     — coarse cells per dimension (8)
+- `EXPMSFEM_NFE`     — fine cells per coarse cell (8)
+- `EXPMSFEM_NE_MAX`  — max number of edge eigenmodes per edge (5 elliptic / 6 Helmholtz)
+- `EXPMSFEM_K0`      — wavenumber, Helmholtz only (2.0)
 
 Example:
 
@@ -41,11 +57,11 @@ Example:
 EXPMSFEM_NCE=8 EXPMSFEM_NFE=16 EXPMSFEM_NE_MAX=5 julia -t 4 Elliptic/ExponentialMsFEMsolver.jl
 ```
 
-Dependencies (`Project.toml`): `ForwardDiff`. The first run auto-precompiles; use `-t N` for `N`-way threaded offline.
+Dependencies (`Project.toml`): `ForwardDiff` (elliptic driver only). Use `-t N` for `N`-way threaded offline.
 
 ## Validation
 
-At `Nce=8`, `Nfe=16`, exponential H¹ decay in the number of edge modes per edge:
+**Elliptic** at `Nce=8`, `Nfe=16`, exponential H¹ decay in the number of edge modes per edge:
 
 | N_e | relative L²  | relative H¹ |
 |-----|--------------|-------------|
@@ -54,6 +70,18 @@ At `Nce=8`, `Nfe=16`, exponential H¹ decay in the number of edge modes per edge
 | 3   | 4.52e-4      | 5.18e-3     |
 | 4   | 7.37e-5      | 1.14e-3     |
 | 5   | 2.24e-5      | 3.74e-4     |
+
+**Helmholtz** at `Nce=Nfe=8`, `k₀=2`, impedance BC with per-side plane-wave data:
+
+| N_e | relative L²  | relative H¹ |
+|-----|--------------|-------------|
+| 1   | 1.70e-5      | 6.10e-4     |
+| 2   | 6.78e-7      | 3.43e-5     |
+| 3   | 1.60e-7      | 8.75e-6     |
+| 4   | 6.57e-9      | 4.78e-7     |
+| 5   | 7.40e-10     | 6.16e-8     |
+
+At `N_e = N_f − 1` the generalised eigenproblem sits at the numerical rank boundary of `R'NR` (`R` has `N_f − 1` rows) and can pick up a spurious mode. Keep `N_e ≤ N_f − 2` for stable convergence.
 
 ## Relevant papers
 
