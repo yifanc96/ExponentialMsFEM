@@ -32,36 +32,14 @@ def local_to_global_nodes(Nx: int, Ny: int):
 
 
 def cell_boundary_nodes(Nx: int, Ny: int):
-    """Return the local-patch boundary node indices in Matlab order:
-    [bottom row (Nx+1), left column interior (Ny-0? let me re-check), ...].
-
-    Actually we reproduce Matlab's precise concatenation, which is
-      b = [ 1..Nx+1                                       % bottom row, all nodes
-            Nx+2 : Nx+1 : (Nx+1)*(Ny+1)                   % left-col interior (Ny)
-            2*(Nx+1) : Nx+1 : (Nx+1)*(Ny+1)               % right-col interior (Ny)
-            Nx*Ny+Ny+2 : (Nx+1)*(Ny+1)-1 ]                % top-row interior (Nx-1)
-    in 1-indexed form. We return the 0-indexed equivalents.
-
-    Wait Matlab uses N_f = Nx = Ny for square cells. The indices above come
-    from basefun.m / bubble.m / harmext.m where the grid is square. For the
-    oversampled patch in basefun1.m, grid is generally (Nx+1)x(Ny+1) with Nx!=Ny
-    and the same formula pattern applies substituting (Nx,Ny).
+    """Perimeter node indices on an (Nx+1)×(Ny+1) grid, 0-indexed, in the
+    order `[bottom row, left-col interior, right-col interior, top-row
+    interior]` (matches Matlab basefun.m / harmext.m / restrict.m).
     """
-    # bottom row: (i, 0) for i=0..Nx  -> size Nx+1
     bottom = np.arange(Nx + 1, dtype=np.int64)
-
-    # left column interior: (0, j) for j=1..Ny -> size Ny
-    # Matlab 'Nx+2 : Nx+1 : (Nx+1)*(Ny+1)' is 1-indexed
-    # In 1-indexed terms: Nx+2, 2*(Nx+1)+1, 3*(Nx+1)+1, ...
-    # Actually let's just recompute: (0, j) for j=1..Ny => indices j*(Nx+1) for j=1..Ny
     left = np.arange(1, Ny + 1, dtype=np.int64) * (Nx + 1)
-
-    # right column interior: (Nx, j) for j=1..Ny -> size Ny
     right = np.arange(1, Ny + 1, dtype=np.int64) * (Nx + 1) + Nx
-
-    # top row interior: (i, Ny) for i=1..Nx-1 -> size Nx-1
     top_interior = Ny * (Nx + 1) + np.arange(1, Nx, dtype=np.int64)
-
     return np.concatenate([bottom, left, right, top_interior])
 
 

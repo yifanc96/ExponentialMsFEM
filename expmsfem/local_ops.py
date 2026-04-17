@@ -340,49 +340,6 @@ def harmext_cached(ws: "Workspace", m: int, n: int, i: int):
     return L1, L2, N_mat
 
 
-def _edge_row_indices_in_patch(t: int, m: int, N_c: int,
-                               Nx_fine: int, Ny_fine: int, N_f: int):
-    """Global (patch) node indices of the shared edge in the oversampled patch.
-
-    Mirrors Matlab restrict.m's `c` branches. Returns a 1D array of length
-    N_f+1 (the shared edge has N_f+1 fine nodes).
-    """
-    if t == 1:
-        # Horizontal edge: sits at y = Y_c(n+1), spans m's coarse cell in x.
-        # In Matlab, if m==1 the patch has 2 coarse cells in x, edge = columns
-        # 1..N_f+1 in the row y = row index N_f from bottom.
-        # Generic 1-indexed Matlab: row starts at (N_x+1)*N_f + <col_start>.
-        if m == 0:
-            col_start = 0  # 0-indexed
-            col_end = N_f + 1
-        else:
-            col_start = N_f
-            col_end = 2 * N_f + 1
-        row_idx = N_f  # y-index of the shared edge in the patch (bottom cell top)
-        # In row-major j-then-i layout, node (i, j) = j * (Nx_fine+1) + i
-        row_offset = row_idx * (Nx_fine + 1)
-        return row_offset + np.arange(col_start, col_end)
-    else:
-        # Vertical edge: sits at x = X_c(m+1), spans n's coarse cell in y.
-        if n_is_zero := False:
-            pass  # placeholder — actual logic below
-        # We handle via the `n` argument; see caller
-        raise NotImplementedError("handled in caller via _edge_col_indices_in_patch")
-
-
-def _edge_col_indices_in_patch(n: int, Nx_fine: int, N_f: int):
-    """For vertical edge case: indices of edge column in the 2-wide (in x)
-    by ?-tall (in y) patch. Edge is at x = X_c(m+1), column index N_f."""
-    if n == 0:
-        row_start = 0
-        row_end = N_f + 1
-    else:
-        row_start = N_f
-        row_end = 2 * N_f + 1
-    col_idx = N_f
-    return np.arange(row_start, row_end) * (Nx_fine + 1) + col_idx
-
-
 def _restrict_active_mask(N_c: int, N_f: int, m: int, n: int, t: int,
                           N_x: int, N_y: int) -> np.ndarray:
     """Bool array of length 2*(N_x+N_y) indicating which patch-perimeter DOFs

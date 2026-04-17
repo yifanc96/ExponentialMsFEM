@@ -13,7 +13,8 @@ The default implementation on `main` is **Python/JAX**. A parallel Julia impleme
 - **`examples/`** — scripts mirroring the Matlab `main.m` drivers for periodic / random / high-contrast elliptic and for the Helmholtz case.
 - **`demos/`** — six standalone figure-generating demos. Re-run with `python demos/run_all.py`.
 - **`figures/`** — gallery of pre-generated PNGs used below.
-- **`Elliptic/`** — the original (unfinished) Julia stub of the repo. The completed Julia implementation is on the [`julia-code`](https://github.com/yifanc96/ExponentialMsFEM/tree/julia-code) branch.
+
+The companion Julia implementation (FEM, classical MsFEM, and ExpMsFEM for both elliptic and Helmholtz) lives on the [`julia-code`](https://github.com/yifanc96/ExponentialMsFEM/tree/julia-code) branch.
 
 ## Quickstart
 
