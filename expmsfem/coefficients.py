@@ -176,3 +176,76 @@ def default_hole_lattice(n_per_side: int = 4, margin: float = 0.125) -> np.ndarr
     pts = np.linspace(margin, 1 - margin, n_per_side)
     X, Y = np.meshgrid(pts, pts, indexing="xy")
     return np.stack([X.ravel(), Y.ravel()], axis=-1)
+
+
+# -----------------------------------------------------------------------------
+# NACA 0012 airfoil inside a box far-field (CFD-adjacent)
+# -----------------------------------------------------------------------------
+
+
+# Standard NACA 00xx thickness coefficients (closed-trailing-edge polynomial is
+# not used here — we keep the textbook leading-edge sqrt form).
+_NACA_THK_COEFS = (0.2969, -0.1260, -0.3516, 0.2843, -0.1036)
+
+
+def _naca_thickness(x_rel, thickness: float = 0.12):
+    """NACA 00xx half-thickness at chord-fraction `x_rel ∈ [0, 1]`,
+    normalised by chord length. Returns `y_t` such that the airfoil upper
+    surface is at `+y_t * chord_length` relative to the chord line.
+    """
+    xr = np.clip(x_rel, 0.0, 1.0)
+    a0, a1, a2, a3, a4 = _NACA_THK_COEFS
+    return 5 * thickness * (a0 * np.sqrt(xr) + a1 * xr
+                             + a2 * xr ** 2 + a3 * xr ** 3 + a4 * xr ** 4)
+
+
+def afun_naca0012(chord_start: float = 0.2, chord_end: float = 0.8,
+                  y_center: float = 0.5, thickness: float = 0.12,
+                  alpha_deg: float = 0.0,
+                  a_out: float = 1.0, a_in: float = 1e-6):
+    """Factory: returns a callable `a(x, y)` that realises a NACA 00xx
+    airfoil of thickness `thickness` (default 12%) embedded inside the
+    `[0, 1]²` box far-field via the fictitious-domain trick: `a = a_out`
+    outside the airfoil, `a = a_in` (very small by default) inside.
+
+    The airfoil chord runs from `(chord_start, y_center)` to
+    `(chord_end, y_center)`. An angle-of-attack rotation `alpha_deg` (in
+    degrees, counterclockwise) about the leading edge is also supported —
+    standard CFD convention.
+
+    As `a_in / a_out → 0`, the airfoil interior becomes effectively
+    Dirichlet-zero, giving the classical solid-obstacle flow-like problem
+    for the Laplacian inside a rectangular far-field box. The ExpMsFEM
+    pipeline handles the geometry automatically — the edge eigenbasis
+    adapts to the sharp coefficient jump at the airfoil surface, and the
+    sqrt-singular leading-edge curvature is resolved by a sufficiently
+    fine `N_f`.
+
+    Example:
+
+        >>> a = afun_naca0012(chord_start=0.2, chord_end=0.8, y_center=0.5)
+        >>> a(0.5, 0.5)  # inside the airfoil (midchord)
+        np.float64(1e-06)
+        >>> a(0.5, 0.45)  # outside (below lower surface for a thin airfoil)
+        np.float64(1.0)
+    """
+    chord_length = chord_end - chord_start
+    alpha = np.deg2rad(alpha_deg)
+    cos_a, sin_a = np.cos(alpha), np.sin(alpha)
+
+    def a(x, y):
+        x = np.asarray(x, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+        # Rotate (x, y) about the leading edge (chord_start, y_center) by -alpha
+        # so the rotated point lies in the airfoil's body frame.
+        dx = x - chord_start
+        dy = y - y_center
+        xb =  cos_a * dx + sin_a * dy
+        yb = -sin_a * dx + cos_a * dy
+        # Non-dim chord coordinate
+        xr = xb / chord_length
+        y_t = _naca_thickness(xr, thickness) * chord_length
+        inside = (xr >= 0.0) & (xr <= 1.0) & (np.abs(yb) <= y_t)
+        return np.where(inside, a_in, a_out)
+
+    return a

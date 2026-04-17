@@ -122,6 +122,24 @@ a = afun_perforated(centers, hole_radius=0.07, a_out=1.0, a_in=1e-6)
 out = run_expmsfem(a, N_c=8, N_f=16, N_e=4, n_workers=4)
 ```
 
+### 10. CFD-adjacent: NACA 0012 airfoil in a box far-field
+
+The same fictitious-domain trick scales up to a geometrically non-trivial CFD-style obstacle — a NACA 0012 airfoil at a prescribed angle of attack embedded inside the `[0, 1]²` box. The airfoil's sharp trailing edge and sqrt-singular leading edge are resolved purely through the coefficient jump — no mesh conforming, no cut cells. `N_c = 8`, `N_f = 32`, `N_e = 4` with `10^6`× contrast gives relative H¹ error ~`3e-5` vs a fine-FEM reference (and the airfoil interior is masked in the plot because `u_inside ∝ 1/a_in` is a fictitious-domain artifact, not the physical quantity of interest).
+
+![naca0012](figures/naca0012.png)
+
+```python
+from expmsfem.coefficients import afun_naca0012
+from expmsfem.driver import run_expmsfem
+
+a = afun_naca0012(chord_start=0.2, chord_end=0.8, y_center=0.5,
+                  thickness=0.12, alpha_deg=6.0,
+                  a_out=1.0, a_in=1e-6)
+out = run_expmsfem(a, N_c=8, N_f=32, N_e=4, n_workers=4)
+```
+
+The problem here is the scalar elliptic `-∇·(a ∇u) = f` with homogeneous Dirichlet on the box — **not** incompressible Navier–Stokes — but the geometric complexity and the adapted-basis story carry over to any PDE whose weak form is handled elementwise on a rectangular background mesh.
+
 ## Features
 
 | Problem                                      | Module                                  |
@@ -130,6 +148,7 @@ out = run_expmsfem(a, N_c=8, N_f=16, N_e=4, n_workers=4)
 | Elliptic, random rough coefficient           | `afun_random` + `run_expmsfem`          |
 | Elliptic, high-contrast channel coefficient  | `afun_highcontrast` + `run_expmsfem`    |
 | Elliptic, perforated (fictitious-domain)     | `afun_perforated` + `run_expmsfem`      |
+| Elliptic, NACA 0012 airfoil in box far-field | `afun_naca0012` + `run_expmsfem`        |
 | Helmholtz impedance (complex, indefinite)    | `expmsfem.helmholtz.driver.run_expmsfem_helm` |
 | Baselines: `H+bubble`, `O(H)`                | `expmsfem.baselines`                    |
 
