@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "expmsfem"
+version = "0.1.0"
+description = "Exponentially Convergent Multiscale Finite Element Method (ExpMsFEM) in Python/JAX"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Yifan Chen"},
+]
+keywords = [
+    "multiscale",
+    "finite element method",
+    "MsFEM",
+    "exponential convergence",
+    "Helmholtz",
+    "elliptic PDE",
+]
+dependencies = [
+    "jax>=0.4.30",
+    "jaxlib>=0.4.30",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3",
+]
+
+[project.urls]
+Repository = "https://github.com/yifanc96/ExponentialMsFEM"
+Paper-2021 = "https://arxiv.org/abs/2007.07418"
+Paper-2023 = "https://arxiv.org/abs/2105.04080"
+Paper-2024 = "https://arxiv.org/abs/2212.00823"
+
+[tool.setuptools.packages.find]
+include = ["expmsfem*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "slow: tests that take more than a few seconds",
+]

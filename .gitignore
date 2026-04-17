@@ -28,3 +28,19 @@ Manifest.toml
 code_small_size*
 Archive*
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+
+# Saved runs (example drivers write .npz)
+examples/*.npz
+*.swp
