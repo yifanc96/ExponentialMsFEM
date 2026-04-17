@@ -1,20 +1,16 @@
 # ExponentialMsFEM
 
-Exponentially convergent multiscale finite element methods (ExpMsFEM) for 2D elliptic, Helmholtz, and time dependent Schrodinger problems on uniform rectangular meshes. Educational use.
-
-The default implementation on `main` is **Python/JAX**. A parallel Julia implementation lives on the [`julia-code`](https://github.com/yifanc96/ExponentialMsFEM/tree/julia-code) branch.
+Exponentially convergent multiscale finite element methods (ExpMsFEM) for 2D elliptic, Helmholtz, and time-dependent Schrödinger problems on uniform rectangular meshes. **Educational Python/JAX implementation**; a parallel Julia port lives on the [`julia-code`](https://github.com/yifanc96/ExponentialMsFEM/tree/julia-code) branch.
 
 ![convergence](figures/convergence.png)
 
-## What's in here
+## Contents
 
-- **`expmsfem/`** — the Python package. Elliptic and Helmholtz ExpMsFEM plus the `H+bubble` / `O(H)` MsFEM baselines.
-- **`tests/`** — 61 unit + convergence tests covering primitives, local operators, assembly, and end-to-end convergence.
-- **`examples/`** — scripts mirroring the [Matlab](https://github.com/RoyWangyx/Exponentially-convergent-multiscale-finite-elements.git) `main.m` drivers for periodic / random / high-contrast elliptic and for the Helmholtz case.
-- **`demos/`** — six standalone figure-generating demos. Re-run with `python demos/run_all.py`.
-- **`figures/`** — gallery of pre-generated PNGs used below.
-
-The companion Julia implementation (FEM, classical MsFEM, and ExpMsFEM for both elliptic and Helmholtz) lives on the [`julia-code`](https://github.com/yifanc96/ExponentialMsFEM/tree/julia-code) branch.
+- [`expmsfem/`](expmsfem) — Python package: ExpMsFEM for elliptic, Helmholtz, and time-dependent Schrödinger; `H+bubble` and `O(H)` MsFEM baselines.
+- [`tests/`](tests) — 64 unit and convergence tests.
+- [`examples/`](examples) — scripts mirroring the [reference Matlab](https://github.com/RoyWangyx/Exponentially-convergent-multiscale-finite-elements.git) `main.m` drivers (periodic, random, high-contrast, Helmholtz).
+- [`demos/`](demos) — 11 standalone figure-generating demos. Re-run with `python demos/run_all.py`.
+- [`figures/`](figures) — pre-generated PNGs used below.
 
 ## Quickstart
 
@@ -23,7 +19,7 @@ git clone https://github.com/yifanc96/ExponentialMsFEM.git
 cd ExponentialMsFEM
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest            # 61 passed in ~45s
+.venv/bin/python -m pytest            # 64 passed in ~50s
 .venv/bin/python demos/run_all.py     # regenerate the figure gallery
 ```
 
@@ -47,13 +43,37 @@ from expmsfem.helmholtz.driver import run_expmsfem_helm
 out = run_expmsfem_helm(N_c=8, N_f=8, N_e=5, k0=2.0, n_workers=4)
 ```
 
+For the time-dependent Schrödinger equation (backward Euler, fixed `Δt`):
+
+```python
+from expmsfem.schrodinger.time_dep import SemiclassicalParam, run_expmsfem_schrodinger
+param = SemiclassicalParam(eps=0.3, V_fun=V, dt=1e-3)
+ts, frames, prop = run_expmsfem_schrodinger(
+    param, psi0_fine, N_c=16, N_f=8, N_e=3, n_steps=150, n_workers=4,
+)
+```
+
 For the `H+bubble` / `O(H)` baseline methods:
 
 ```python
 from expmsfem.baselines import run_hbubble, run_OH
 ```
 
-## Demonstrations
+## Demonstration gallery
+
+Each numbered section maps to a script in [`demos/`](demos) and a figure in [`figures/`](figures).
+
+1. [Coefficient fields](#1-coefficient-fields) — periodic / random / high-contrast `a(x)`.
+2. [Exponential convergence](#2-exponential-convergence) — H¹ and L² error vs `N_e`.
+3. [Solution reconstruction](#3-solution-reconstruction) — fine-FEM reference vs ExpMsFEM vs error field.
+4. [Method comparison](#4-method-comparison-exp-vs-hbubble-vs-oh) — Exp vs H+bubble vs O(H).
+5. [Eigenvalue decay](#5-eigenvalue-decay--the-why) — the theoretical source of the exponential rate.
+6. [Helmholtz impedance problem](#6-helmholtz-impedance-problem) — complex-valued solution field.
+7. [What the basis looks like](#7-what-the-basis-actually-looks-like) — nodal, edge, bubble.
+8. [Plain FEM vs ExpMsFEM on rough coefficients](#8-why-multiscale-beats-plain-fem-on-rough-coefficients).
+9. [Perforated domain](#9-perforated--complicated-domains-fictitious-domain-coefficient) — 16-hole lattice.
+10. [NACA 0012 airfoil](#10-cfd-adjacent-naca-0012-airfoil-in-a-box-far-field) — CFD-adjacent fictitious-domain geometry.
+11. [Time-dependent Schrödinger](#11-time-dependent-schrödinger-with-a-multiscale-potential-semi-classical-backward-euler) — wavepacket scattering through a sub-mesh crystal potential.
 
 ### 1. Coefficient fields
 
@@ -235,14 +255,15 @@ Every variant below instantiates this skeleton with a different operator `A`.
 
 ## Validation
 
-The `tests/` directory includes convergence tests for every variant (periodic / random / high-contrast / Helmholtz) that assert monotone exponential H¹ decay on a tiny problem. Full-size numbers from running the examples:
+The `tests/` directory has convergence tests for every variant (periodic, random, high-contrast, Helmholtz, time-dependent Schrödinger) that assert monotone exponential error decay on a small problem. Headline numbers from running the demos:
 
-| Problem                                | `N_c` | `N_f` | H¹ at `N_e=1`   | H¹ at `N_e=5`   |
-|----------------------------------------|:-----:|:-----:|:----------------:|:----------------:|
-| Elliptic, periodic                     | 8     | 16    | 7.1e-2          | 3.3e-4          |
-| Elliptic, random                       | 8     | 16    | 4.4e-2          | 4.1e-4          |
-| Elliptic, high-contrast 64×            | 8     | 16    | 2.7e-2          | 2.8e-5          |
-| Helmholtz impedance, `k₀=2`           | 8     | 8     | 6.1e-4          | 6.2e-8          |
+| Problem                                 | `N_c` | `N_f` | relative error at `N_e=1`  | at `N_e=5`        |
+|-----------------------------------------|:-----:|:-----:|:--------------------------:|:-----------------:|
+| Elliptic, periodic                      | 8     | 16    | 7.1e-2  (H¹)               | 3.3e-4  (H¹)      |
+| Elliptic, random                        | 8     | 16    | 4.4e-2  (H¹)               | 4.1e-4  (H¹)      |
+| Elliptic, high-contrast 64×             | 8     | 16    | 2.7e-2  (H¹)               | 2.8e-5  (H¹)      |
+| Helmholtz impedance, `k₀=2`             | 8     | 8     | 6.1e-4  (H¹)               | 6.2e-8  (H¹)      |
+| Schrödinger free Gaussian, `ε=0.5`      | 8     | 8     | 4.0e-3  (L²)               | 6.0e-7  (L²)      |
 
 ## Relevant papers
 
