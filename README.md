@@ -77,17 +77,17 @@ Fine-FEM reference vs ExpMsFEM reconstruction on the periodic coefficient, with 
 
 Three multiscale methods, all using the same coarse mesh and all solving the same elliptic problem:
 
-| Method       | Per-cell basis                                          | What's captured                                  |
-|--------------|---------------------------------------------------------|--------------------------------------------------|
-| **Exp**      | 4 nodal hats + `N_e` edge eigen-modes **+ 1 edge bubble** per edge **+ 1 cell bubble**  | harmonic (edge) + bubble (interior); exponential-in-`N_e` convergence |
-| **H+bubble** | 4 nodal hats + `N_e` edge eigen-modes + 1 cell bubble (no edge bubble)     | harmonic edges with the bubble glued on; algebraic rate |
-| **O(H)**     | 4 nodal hats + `N_e` edge eigen-modes only                              | harmonic edges alone; can't resolve the RHS-driven interior — stalls at `O(H)` |
+| Method       | Per-cell basis                                          | Convergence in `N_e`                  |
+|--------------|---------------------------------------------------------|---------------------------------------|
+| **Exp**      | 4 nodal hats + `N_e` edge eigen-modes **+ 1 edge bubble** per edge **+ 1 cell bubble**  | **exponential**, with a proven rate `exp(−α N_e^{1/(d+1)})` |
+| **H+bubble** | 4 nodal hats + `N_e` edge eigen-modes + 1 cell bubble (no edge bubble)     | **empirically exponential**, with a smaller rate — no proof yet |
+| **O(H)**     | 4 nodal hats + `N_e` edge eigen-modes only                              | stalls at `O(H)` — no bubble means the RHS-driven interior is unresolved |
 
 The "cell bubble" is the particular solution of `−∇·(a∇u) = f` on one cell with zero perimeter data; the "edge bubble" is the trace of the analogous oversampled-patch bubble extended back into each cell. Both are RHS-driven basis functions — they live in the **bubble subspace** of the harmonic-bubble decomposition.
 
 ![method_comparison](figures/method_comparison.png)
 
-Only Exp's error drops exponentially with `N_e`; H+bubble improves algebraically, O(H) stalls near its initial value.
+Exp has the sharpest rate and the theoretical guarantee. H+bubble's curve is also essentially straight on the semilogy axis — it's empirically exponential too, just with a smaller decay constant — but a rigorous bound isn't known yet. O(H) plateaus because, without any bubble, it cannot represent the RHS-driven interior content regardless of how many edge modes you add.
 
 ### 5. Eigenvalue decay — the *why*
 
