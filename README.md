@@ -1,6 +1,6 @@
 # ExponentialMsFEM
 
-Exponentially convergent multiscale finite element methods (ExpMsFEM) for 2D elliptic and Helmholtz problems on uniform rectangular meshes.
+Exponentially convergent multiscale finite element methods (ExpMsFEM) for 2D elliptic, Helmholtz, and time dependent Schrodinger problems on uniform rectangular meshes. Educational use.
 
 The default implementation on `main` is **Python/JAX**. A parallel Julia implementation lives on the [`julia-code`](https://github.com/yifanc96/ExponentialMsFEM/tree/julia-code) branch.
 
