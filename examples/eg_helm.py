@@ -20,6 +20,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
+from expmsfem.helmholtz import element_basis as heb
 from expmsfem.helmholtz import local_ops as hlo
 from expmsfem.helmholtz.driver import run_expmsfem_helm
 from expmsfem.helmholtz.fem import solve_fine
@@ -48,9 +49,13 @@ def main():
     print(f"prefactor LUs: {time.time() - t0:.2f}s "
           f"({len(ws._cell)} cells, {len(ws._patch)} patches)")
 
+    # Pre-populate edge cache at N_e_max so every sweep iteration just slices.
+    t0 = time.time()
+    heb.prefactor_edges(ws, args.N_e_max, n_workers=args.n_workers)
+    print(f"prefactor edges @ N_e={args.N_e_max}: {time.time() - t0:.2f}s")
+
     L2 = np.zeros(args.N_e_max)
     H1 = np.zeros(args.N_e_max)
-    H1m = np.zeros(args.N_e_max)
     times = np.zeros(args.N_e_max)
 
     for N_e in range(1, args.N_e_max + 1):
@@ -63,14 +68,13 @@ def main():
         dt = time.time() - t_start
         L2[N_e - 1] = out["e_L2"]
         H1[N_e - 1] = out["e_H1"]
-        H1m[N_e - 1] = out["e_H1_matlab"]
         times[N_e - 1] = dt
         print(f"N_e={N_e}: L2={out['e_L2']:.3e}  H1={out['e_H1']:.3e}  "
               f"time={dt:.1f}s")
 
     np.savez(args.save, N_c=N_c, N_f=N_f, k0=k0,
              N_e=np.arange(1, args.N_e_max + 1),
-             L=L2, H=H1, H_matlab=H1m, times=times)
+             L=L2, H=H1, times=times)
     print(f"saved {args.save}")
 
 

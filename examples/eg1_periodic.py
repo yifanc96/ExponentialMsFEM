@@ -38,17 +38,22 @@ def main():
     u_ref, K_ref, M_ref, _ = solve_fine(afun_periodic, N_c * N_f)
     print(f"fine reference: {time.time() - t0:.2f}s")
 
-    # Pre-factor the Workspace ONCE; reuse across N_e values. Edge cache must
-    # be cleared per N_e because N_e changes how many eigenmodes are kept.
+    # Pre-factor the Workspace ONCE and pre-populate the per-edge eigen-basis
+    # cache at the *largest* N_e we'll sweep. Each subsequent per-N_e run then
+    # slices cached columns and skips the heavy eigendecomposition entirely.
     ws = local_ops.Workspace(afun_periodic, N_c, N_f)
     t0 = time.time()
     ws.prefactor_all(n_workers=args.n_workers)
     print(f"prefactor LUs (shared): {time.time() - t0:.2f}s "
           f"({len(ws._cell)} cells, {len(ws._patch)} patches)")
 
+    t0 = time.time()
+    element_basis.prefactor_edges(ws, args.N_e_max, n_workers=args.n_workers)
+    print(f"prefactor edges @ N_e={args.N_e_max}: {time.time() - t0:.2f}s "
+          f"({len(ws._edge_cache)} edges, reused across the N_e sweep)")
+
     L2 = np.zeros(args.N_e_max)
     H1 = np.zeros(args.N_e_max)
-    H1m = np.zeros(args.N_e_max)
     times = np.zeros(args.N_e_max)
 
     for N_e in range(1, args.N_e_max + 1):
@@ -63,14 +68,12 @@ def main():
         dt = time.time() - t_start
         L2[N_e - 1] = out["e_L2"]
         H1[N_e - 1] = out["e_H1"]
-        H1m[N_e - 1] = out["e_H1_matlab"]
         times[N_e - 1] = dt
         print(f"N_e={N_e}: L2={out['e_L2']:.3e}  H1={out['e_H1']:.3e}  "
-              f"H1_matlab={out['e_H1_matlab']:.3e}  time={dt:.1f}s")
+              f"time={dt:.1f}s")
 
-    # Save results in Matlab-compatible layout.
     np.savez(args.save, N_c=N_c, N_f=N_f, N_e=np.arange(1, args.N_e_max + 1),
-             L=L2, H=H1, H_matlab=H1m, times=times)
+             L=L2, H=H1, times=times)
     print(f"saved {args.save}")
 
 

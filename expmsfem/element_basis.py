@@ -93,21 +93,24 @@ def _eigen_modes(R: np.ndarray, N: np.ndarray, P: np.ndarray, N_e: int) -> np.nd
 def _build_edge_data(ws, t, m_edge, n_edge, N_e):
     """Compute the per-edge data shared by both adjacent cells: the lifted
     eigen-basis on each side and the lifted edge-bubble on each side. Returns
-    a 4-tuple (L1_RV, L2_RV, L1_bub, L2_bub).
+    a 5-tuple (L1_RV, L2_RV, L1_bub, L2_bub, N_e_cached) with N_e_cached == N_e.
+    The first four arrays have N_e_cached columns; callers slice to the
+    requested count (see `_edge_contribution_cached`) to reuse across N_e.
     """
     L1, L2, N = local_ops.harmext_cached(ws, m_edge, n_edge, t)
     R, P, bub = local_ops.restrict_cached(ws, m_edge, n_edge, t)
     V = _eigen_modes(R, N, P, N_e)
     RV = R @ V
-    return (L1 @ RV, L2 @ RV, L1 @ bub, L2 @ bub)
+    return (L1 @ RV, L2 @ RV, L1 @ bub, L2 @ bub, N_e)
 
 
 def prefactor_edges(ws, N_e: int, n_workers: int | None = None):
-    """Populate ws._edge_cache with per-interior-edge lifted bases.
+    """Ensure ws._edge_cache holds ≥ N_e eigen-modes for every interior edge.
 
-    Called once after ws.prefactor_all(). Each interior edge is computed
-    exactly once (the Matlab code computes every edge twice, once per adjacent
-    cell). Edges are computed in parallel via a thread pool.
+    Called once after ws.prefactor_all(). Each interior edge is computed only
+    if the cache is empty or holds fewer than N_e modes, so sweeps over
+    increasing N_e reuse prior work. Edges are computed in parallel via a
+    thread pool.
     """
     import concurrent.futures as cf
 
@@ -115,29 +118,36 @@ def prefactor_edges(ws, N_e: int, n_workers: int | None = None):
     horiz = [(1, m, n) for n in range(N_c - 1) for m in range(N_c)]
     vert = [(2, m, n) for n in range(N_c) for m in range(N_c - 1)]
     keys = horiz + vert
+    work = [k for k in keys if _cache_needs_rebuild(ws, k, N_e)]
+    if not work:
+        return
 
     def _one(key):
         t, m_edge, n_edge = key
         return key, _build_edge_data(ws, t, m_edge, n_edge, N_e)
 
     with cf.ThreadPoolExecutor(max_workers=n_workers) as pool:
-        for key, val in pool.map(_one, keys):
+        for key, val in pool.map(_one, work):
             ws._edge_cache[key] = val
+
+
+def _cache_needs_rebuild(ws, key, N_e: int) -> bool:
+    cached = ws._edge_cache.get(key)
+    return cached is None or cached[4] < N_e
 
 
 def _edge_contribution_cached(ws, m_edge, n_edge, t, side, N_e):
     """Fast path: lookup pre-built edge data from ws._edge_cache. If not
-    present (e.g. prefactor_edges wasn't called), build on the fly."""
+    present (e.g. prefactor_edges wasn't called) or cached with fewer than
+    N_e modes, (re)build on the fly; otherwise slice the leading N_e columns."""
     key = (t, m_edge, n_edge)
-    cached = ws._edge_cache.get(key)
-    if cached is None:
-        cached = _build_edge_data(ws, t, m_edge, n_edge, N_e)
-        ws._edge_cache[key] = cached
-    L1_RV, L2_RV, L1_bub, L2_bub = cached
+    if _cache_needs_rebuild(ws, key, N_e):
+        ws._edge_cache[key] = _build_edge_data(ws, t, m_edge, n_edge, N_e)
+    L1_RV, L2_RV, L1_bub, L2_bub, _ = ws._edge_cache[key]
     if side == "low":
-        return np.concatenate([L1_RV, L1_bub.reshape(-1, 1)], axis=1)
+        return np.concatenate([L1_RV[:, :N_e], L1_bub.reshape(-1, 1)], axis=1)
     else:
-        return np.concatenate([L2_RV, L2_bub.reshape(-1, 1)], axis=1)
+        return np.concatenate([L2_RV[:, :N_e], L2_bub.reshape(-1, 1)], axis=1)
 
 
 def element_basis_cached(ws: "local_ops.Workspace", m: int, n: int, N_e: int):

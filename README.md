@@ -23,7 +23,25 @@ python3 -m venv .venv
 .venv/bin/python demos/run_all.py
 ```
 
-Always run scripts via `.venv/bin/python` (or activate the venv with `source .venv/bin/activate`) — the package is installed only inside that environment, so any other Python (e.g. a base Anaconda) will fail with `ModuleNotFoundError: No module named 'expmsfem'`. 
+Always run scripts via `.venv/bin/python` (or activate the venv with `source .venv/bin/activate`) — the package is installed only inside that environment, so any other Python (e.g. a base Anaconda) will fail with `ModuleNotFoundError: No module named 'expmsfem'`. `pytest` runs 65 unit / convergence tests (~55 s), and `demos/run_all.py` regenerates every figure in [`figures/`](figures).
+
+**Run a convergence sweep** — each script prints relative `L²` / `H¹` errors for `N_e = 1, 2, …` and saves an `.npz`:
+
+```bash
+.venv/bin/python examples/eg1_periodic.py     # elliptic, periodic coefficient (Matlab main.m mesh, N_c=N_f=32)
+.venv/bin/python examples/eg2_random.py       # elliptic, random rough coefficient
+.venv/bin/python examples/eg3_highcontrast.py # elliptic, high-contrast channels
+.venv/bin/python examples/eg_helm.py          # Helmholtz impedance (k₀=2, N_c=N_f=8)
+```
+
+Each takes an `--N_c`, `--N_f`, `--N_e_max`, and `--n_workers`. For exploration, `--N_c 16 --N_f 16` runs in seconds; the default `32×32` mesh matches the Matlab reference and takes a few minutes on a laptop.
+
+**Run a single demo:**
+
+```bash
+.venv/bin/python demos/demo_02_convergence.py    # one figure → figures/convergence.png
+.venv/bin/python demos/demo_12_wavepacket_periodic.py
+```
 
 ## Minimal example
 

@@ -565,26 +565,37 @@ def _eigen_modes(R, N_mat, P, N_e):
 
 
 def _build_edge_data(ws, t, m_edge, n_edge, N_e):
+    """Per-edge eigen-basis + bubble lifts. Returns
+    `(L1·RV, L2·RV, L1·bub, L2·bub, N_e_cached)`; callers slice to the
+    requested N_e so larger sweeps don't force a rebuild."""
     L1, L2, N_mat = harmext(ws, m_edge, n_edge, t)
     R, P, bub_edge = restrict(ws, m_edge, n_edge, t)
     V = _eigen_modes(R, N_mat, P, N_e)
     RV = R @ V
-    return (L1 @ RV, L2 @ RV, L1 @ bub_edge, L2 @ bub_edge)
+    return (L1 @ RV, L2 @ RV, L1 @ bub_edge, L2 @ bub_edge, N_e)
+
+
+def _cache_needs_rebuild(ws, key, N_e: int) -> bool:
+    cached = ws._edge_cache.get(key)
+    return cached is None or cached[4] < N_e
 
 
 def prefactor_edges(ws: Workspace, N_e, n_workers=None):
-    ws._edge_cache = {}
+    """Ensure ws._edge_cache holds ≥ N_e modes per interior edge; edges
+    already cached with enough modes are left alone."""
     N_c = ws.N_c
     if ws.param.boundary == "periodic":
-        # Every edge of the torus is interior: N_c² horizontal + N_c² vertical.
         keys = ([(1, m, n) for n in range(N_c) for m in range(N_c)]
                 + [(2, m, n) for n in range(N_c) for m in range(N_c)])
     else:
         keys = ([(1, m, n) for n in range(N_c - 1) for m in range(N_c)]
                 + [(2, m, n) for n in range(N_c) for m in range(N_c - 1)])
+    work = [k for k in keys if _cache_needs_rebuild(ws, k, N_e)]
+    if not work:
+        return
     with cf.ThreadPoolExecutor(max_workers=n_workers) as pool:
         for key, val in pool.map(lambda k: (k, _build_edge_data(ws, *k, N_e)),
-                                  keys):
+                                  work):
             ws._edge_cache[key] = val
 
 
@@ -627,24 +638,24 @@ def _element_value(ws: Workspace, m, n, N_e):
     # For periodic BC every edge is interior and neighbour indices wrap mod N_c.
     if periodic or n > 0:
         n_lower = (n - 1) % N_c if periodic else (n - 1)
-        L1RV, L2RV, L1b, L2b = ws._edge_cache[(1, m, n_lower)]
-        value[:, off:off + N_e] = L2RV
+        L1RV, L2RV, L1b, L2b, _ = ws._edge_cache[(1, m, n_lower)]
+        value[:, off:off + N_e] = L2RV[:, :N_e]
         value[:, off + N_e] = L2b
     off += block
     if periodic or n < N_c - 1:
-        L1RV, L2RV, L1b, L2b = ws._edge_cache[(1, m, n)]
-        value[:, off:off + N_e] = L1RV
+        L1RV, L2RV, L1b, L2b, _ = ws._edge_cache[(1, m, n)]
+        value[:, off:off + N_e] = L1RV[:, :N_e]
         value[:, off + N_e] = L1b
     off += block
     if periodic or m > 0:
         m_lower = (m - 1) % N_c if periodic else (m - 1)
-        L1RV, L2RV, L1b, L2b = ws._edge_cache[(2, m_lower, n)]
-        value[:, off:off + N_e] = L2RV
+        L1RV, L2RV, L1b, L2b, _ = ws._edge_cache[(2, m_lower, n)]
+        value[:, off:off + N_e] = L2RV[:, :N_e]
         value[:, off + N_e] = L2b
     off += block
     if periodic or m < N_c - 1:
-        L1RV, L2RV, L1b, L2b = ws._edge_cache[(2, m, n)]
-        value[:, off:off + N_e] = L1RV
+        L1RV, L2RV, L1b, L2b, _ = ws._edge_cache[(2, m, n)]
+        value[:, off:off + N_e] = L1RV[:, :N_e]
         value[:, off + N_e] = L1b
     return value
 

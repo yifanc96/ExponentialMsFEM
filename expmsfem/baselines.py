@@ -25,23 +25,17 @@ from typing import Callable
 import numpy as np
 
 from . import assembly, element_basis, fem, local_ops
-from .element_basis import _nodal_basis_cached, _eigen_modes
+from .element_basis import _build_edge_data, _cache_needs_rebuild, _nodal_basis_cached
 
 
 def _edge_contribution_nobub(ws: local_ops.Workspace, m_edge: int, n_edge: int,
                              t: int, side: str, N_e: int) -> np.ndarray:
-    """Return N_e basis columns (no edge-bubble) for the side of an edge."""
+    """Return the leading N_e basis columns (no edge-bubble) for one side."""
     key = (t, m_edge, n_edge)
-    cached = ws._edge_cache.get(key)
-    if cached is None:
-        L1, L2, N = local_ops.harmext_cached(ws, m_edge, n_edge, t)
-        R, P, bub = local_ops.restrict_cached(ws, m_edge, n_edge, t)
-        V = _eigen_modes(R, N, P, N_e)
-        RV = R @ V
-        cached = (L1 @ RV, L2 @ RV, L1 @ bub, L2 @ bub)
-        ws._edge_cache[key] = cached
-    L1_RV, L2_RV, _, _ = cached
-    return L1_RV if side == "low" else L2_RV
+    if _cache_needs_rebuild(ws, key, N_e):
+        ws._edge_cache[key] = _build_edge_data(ws, t, m_edge, n_edge, N_e)
+    L1_RV, L2_RV, _, _, _ = ws._edge_cache[key]
+    return (L1_RV if side == "low" else L2_RV)[:, :N_e]
 
 
 def _element_basis_baseline(ws: local_ops.Workspace, m: int, n: int, N_e: int):
@@ -96,7 +90,8 @@ def run_baseline(a_fun: Callable, N_c: int, N_f: int, N_e: int,
             print(f"  prefactor LUs: {time.time() - t0:.2f}s")
     else:
         ws = workspace
-        ws._edge_cache = {}
+        # Reuse edge cache: prefactor_edges only rebuilds edges with fewer
+        # than N_e cached modes.
 
     # Prefactor edges (populates ws._edge_cache) using the SAME routine as Exp
     t0 = time.time()
@@ -159,14 +154,12 @@ def run_baseline(a_fun: Callable, N_c: int, N_f: int, N_e: int,
     num_H1 = float(e @ (K_ref @ e))
     den_H1 = float(u_ref @ (K_ref @ u_ref))
     e_H1 = np.sqrt(num_H1 / den_H1) if den_H1 > 0 else np.inf
-    e_H1_m = np.sqrt(num_H1 / np.sqrt(den_H1)) if den_H1 > 0 else np.inf
 
     return {
         "u_ms_fine": u_ms_fine,
         "u_ref_fine": u_ref,
         "e_L2": e_L2,
         "e_H1": e_H1,
-        "e_H1_matlab": e_H1_m,
         "K_ref": K_ref,
         "M_ref": M_ref,
     }

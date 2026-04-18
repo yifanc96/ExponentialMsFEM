@@ -45,7 +45,7 @@ def run_expmsfem_helm(N_c: int, N_f: int, N_e: int, k0: float,
     """Solve the Helmholtz impedance ExpMsFEM problem.
 
     Returns a dict with {"u_ms_fine", "u_ref_fine", "e_L2", "e_H1",
-    "e_H1_matlab", "B_ref", "C_ref"}.
+    "B_ref", "C_ref"}.
     """
     count = 4 + 4 * (N_e + 1)
     n_cells = N_c * N_c
@@ -60,7 +60,8 @@ def run_expmsfem_helm(N_c: int, N_f: int, N_e: int, k0: float,
                   f"({len(ws._cell)} cells, {len(ws._patch)} patches)")
     else:
         ws = workspace
-        ws._edge_cache = {}
+        # Edge cache reused across N_e; prefactor_edges only rebuilds edges
+        # whose cached eigen-mode count is below the current N_e.
 
     t0 = time.time()
     heb.prefactor_edges(ws, N_e, n_workers=n_workers)
@@ -110,15 +111,12 @@ def run_expmsfem_helm(N_c: int, N_f: int, N_e: int, k0: float,
     num_H1 = float(np.real(e.conj() @ (B_ref @ e)))
     den_H1 = float(np.real(u_ref.conj() @ (B_ref @ u_ref)))
     e_H1 = np.sqrt(num_H1 / den_H1) if den_H1 > 0 else np.inf
-    # Matlab form: sqrt(e'*K*e / sqrt(u'*K*u))  (odd but reproduced)
-    e_H1_m = np.sqrt(num_H1 / np.sqrt(den_H1)) if den_H1 > 0 else np.inf
 
     return {
         "u_ms_fine": u_ms_fine,
         "u_ref_fine": u_ref,
         "e_L2": e_L2,
         "e_H1": e_H1,
-        "e_H1_matlab": e_H1_m,
         "B_ref": B_ref,
         "C_ref": C_ref,
     }

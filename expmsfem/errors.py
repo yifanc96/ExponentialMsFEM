@@ -1,5 +1,4 @@
-"""Relative L² and H¹ error norms vs fine-scale reference, matching Matlab
-err.m exactly (including its off-formula sqrt quirk) and also the clean form."""
+"""Relative L² and H¹ error norms vs a fine-scale reference."""
 
 from __future__ import annotations
 
@@ -18,14 +17,3 @@ def rel_h1(u_ref: np.ndarray, u_ms: np.ndarray, K) -> float:
     num = float(e @ (K @ e))
     den = float(u_ref @ (K @ u_ref))
     return np.sqrt(num / den) if den > 0 else np.inf
-
-
-def rel_h1_matlab_compat(u_ref: np.ndarray, u_ms: np.ndarray, K) -> float:
-    """Exact Matlab formula from err.m:
-        sqrt( (erro'*K*erro) / sqrt(u_ref'*K*u_ref) )
-    (extra sqrt in denominator is odd but preserved for direct comparison).
-    """
-    e = u_ref - u_ms
-    num = float(e @ (K @ e))
-    den = float(u_ref @ (K @ u_ref))
-    return np.sqrt(num / np.sqrt(den)) if den > 0 else np.inf

@@ -29,7 +29,7 @@ def run_expmsfem(a_fun: Callable, N_c: int, N_f: int, N_e: int,
     via `ws.prefactor_all()`) to reuse factorisations across runs.
 
     Returns a dict with keys {"u_ms_fine", "u_ref_fine", "e_L2", "e_H1",
-    "e_H1_matlab", "K_ref", "M_ref"}.
+    "K_ref", "M_ref"}.
     """
     import concurrent.futures as cf
     import time
@@ -48,10 +48,9 @@ def run_expmsfem(a_fun: Callable, N_c: int, N_f: int, N_e: int,
                   f"({len(ws._cell)} cells, {len(ws._patch)} patches)")
     else:
         ws = workspace
-        # If the caller pre-built a Workspace we still need to rebuild the
-        # edge cache for *this* N_e, since N_e controls how many eigenmodes
-        # are kept. Clear the edge cache.
-        ws._edge_cache = {}
+        # Edge cache is reused across N_e values: `prefactor_edges` enlarges
+        # each edge's eigen-mode set only when the request exceeds what is
+        # already cached.
 
     # ---- Offline phase 2: per-edge basis (harmext + restrict + eigh) ----
     t0 = time.time()
@@ -100,13 +99,11 @@ def run_expmsfem(a_fun: Callable, N_c: int, N_f: int, N_e: int,
 
     e_L2 = errors.rel_l2(u_ref, u_ms_fine, M_ref)
     e_H1 = errors.rel_h1(u_ref, u_ms_fine, K_ref)
-    e_H1_m = errors.rel_h1_matlab_compat(u_ref, u_ms_fine, K_ref)
     return {
         "u_ms_fine": u_ms_fine,
         "u_ref_fine": u_ref,
         "e_L2": e_L2,
         "e_H1": e_H1,
-        "e_H1_matlab": e_H1_m,
         "K_ref": K_ref,
         "M_ref": M_ref,
     }
